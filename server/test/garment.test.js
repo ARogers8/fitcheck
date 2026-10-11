@@ -84,3 +84,53 @@ test('white products on white backgrounds survive the cut-out', async () => {
   const meta = await sharp(path.join(CACHE_DIR, g.textures.front.file)).metadata();
   assert.ok(meta.height > meta.width * 0.3, `whole shoe kept (${meta.width}x${meta.height})`);
 });
+
+test('a striped cream packshot beats a lifestyle photo listed first (Zara case)', async () => {
+  // Lifestyle: model in the sweater outdoors, busy two-tone background.
+  const lifestyle = await svg(
+    `<rect width="600" height="400" fill="#7a8f6a"/><rect y="400" width="600" height="400" fill="#9a8a70"/>
+     <circle cx="300" cy="80" r="55" fill="#d9a07a"/>
+     <rect x="190" y="140" width="220" height="280" fill="#ede6d6"/>
+     <rect x="190" y="200" width="220" height="18" fill="#3a5a9a"/>
+     <rect x="190" y="290" width="220" height="18" fill="#3a5a9a"/>
+     <rect x="200" y="420" width="200" height="360" fill="#2b2b2b"/>`,
+    '#7a8f6a'
+  );
+  const stripes = Array.from({ length: 8 }, (_, k) => `<rect x="130" y="${200 + k * 60}" width="340" height="16" fill="#3a5a9a"/>`).join('');
+  const packshot = await svg(
+    `<ellipse cx="305" cy="690" rx="200" ry="30" fill="#dcdbd8"/>
+     <path d="M200 150 L400 150 L520 440 L470 460 L470 680 L130 680 L130 460 L80 440 Z" fill="#ede6d6"/>${stripes}`,
+    '#ebeae7'
+  );
+  const a = await analyzePhoto(packshot);
+  assert.ok(a.packshot, `cream knit on warm grey is a packshot (skin ${a.skinFrac})`);
+  const g = await buildGarment(
+    [
+      { url: 'https://static.zara.net/assets/public/aa/0001-e1/0001-e1.jpg?w=1024', buffer: lifestyle },
+      { url: 'https://static.zara.net/assets/public/bb/0001-p/0001-p.jpg?w=1024', buffer: packshot },
+    ],
+    'sweater'
+  );
+  assert.equal(g.textures.front.source, 'https://static.zara.net/assets/public/bb/0001-p/0001-p.jpg?w=1024');
+  assert.equal(g.textures.front.packshot, true);
+});
+
+test('without URL hints, the plain-background model shot beats the lifestyle one', async () => {
+  const street = await svg(
+    `<rect width="300" height="800" fill="#556b5a"/><circle cx="300" cy="80" r="55" fill="#d9a07a"/>
+     <rect x="190" y="140" width="220" height="280" fill="#203050"/>`,
+    '#a08a6a'
+  );
+  const studio = await svg(
+    `<circle cx="300" cy="80" r="55" fill="#d9a07a"/><rect x="190" y="140" width="220" height="280" fill="#203050"/>`,
+    '#efefef'
+  );
+  const g = await buildGarment(
+    [
+      { url: 'https://x.test/1.jpg', buffer: street },
+      { url: 'https://x.test/2.jpg', buffer: studio },
+    ],
+    'sweater'
+  );
+  assert.equal(g.textures.front.source, 'https://x.test/2.jpg');
+});

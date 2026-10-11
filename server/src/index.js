@@ -100,6 +100,24 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
+/** Re-cuts a piece from one photo the user chose ("Use this photo"). */
+app.post('/api/recut', async (req, res) => {
+  const { image, ref, kind } = req.body || {};
+  try {
+    if (!KINDS[kind]) throw new ScrapeError('Unknown garment type.', { status: 400 });
+    const photos = await downloadImages([String(image || '')], ref ? String(ref) : undefined, 1);
+    if (!photos.length) throw new ScrapeError('Couldn’t download that photo.', { status: 502 });
+    const garment = await buildGarment(photos, kind, [{ index: 0, view: 'front' }]);
+    const front = garment.textures.front;
+    if (!front) throw new ScrapeError('Couldn’t find the piece in that photo.', { status: 422 });
+    res.json({ color: garment.color, textures: { front: { ...front, url: `/cache/${front.file}` }, back: null } });
+  } catch (err) {
+    const status = err instanceof ScrapeError ? err.status : 500;
+    if (status === 500) console.error(err);
+    res.status(status).json({ error: err.message });
+  }
+});
+
 /** Proxies product photos so the browser can show them despite hotlink rules. */
 app.get('/api/image', async (req, res) => {
   try {

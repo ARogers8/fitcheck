@@ -115,6 +115,9 @@ button.link { border: 0; background: none; color: var(--muted); text-decoration:
 .photos img { width: 100%; height: 100%; object-fit: contain; }
 .photos figcaption { position: absolute; bottom: 3px; left: 3px; font-size: 10px; background: var(--ink); color: #fff; padding: 1px 5px; border-radius: 4px; }
 .photos .hint { grid-column: 1 / -1; margin: 4px 0 0; }
+.photos figcaption button.link { color: #fff; font-size: 10px; }
+.photos figure.in-use { outline: 2px solid var(--ink); outline-offset: -2px; }
+.hint.error { color: #b3261e; }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--ink); animation: spin 0.9s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .muted { color: var(--muted); }

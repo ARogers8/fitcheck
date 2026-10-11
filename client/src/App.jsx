@@ -5,7 +5,7 @@ import AddPiece from './components/AddPiece.jsx';
 import PieceCard, { KIND_SLOTS } from './components/PieceCard.jsx';
 import FallbackDialog from './components/FallbackDialog.jsx';
 import { useFitcheckStore } from './store.js';
-import { importPiece, formatPrice } from './api.js';
+import { importPiece, recutPiece, formatPrice } from './api.js';
 import { bodyMeasurements } from './body/measurements.js';
 import { recommendSize } from './fit/sizes.js';
 
@@ -62,8 +62,18 @@ export default function App() {
       importPiece({ url: piece.url, kind })
         .then((fresh) => dispatch({ type: 'update', id: piece.id, patch: { textures: fresh.textures, color: fresh.color, photos: fresh.photos } }))
         .catch(() => {});
+    } else if (piece.textures?.front?.source && !piece.textures.front.source.startsWith('data:')) {
+      recutPiece({ image: piece.textures.front.source, ref: piece.url, kind })
+        .then((fresh) => dispatch({ type: 'update', id: piece.id, patch: { textures: { ...fresh.textures, back: piece.textures.back }, color: fresh.color } }))
+        .catch(() => {});
     }
   };
+
+  // "Use this photo": the user overrides which product photo dresses the model.
+  const usePhoto = (piece, image) =>
+    recutPiece({ image, ref: piece.url, kind: piece.kind }).then((fresh) =>
+      dispatch({ type: 'update', id: piece.id, patch: { textures: fresh.textures, color: fresh.color } })
+    );
 
   return (
     <div className="app">
@@ -144,6 +154,7 @@ export default function App() {
                 onTakeOff={() => dispatch({ type: 'takeOff', id: piece.id })}
                 onSize={(size) => dispatch({ type: 'size', id: piece.id, size })}
                 onKind={(kind) => changeKind(piece, kind)}
+                onUsePhoto={(image) => usePhoto(piece, image)}
                 onRemove={() => dispatch({ type: 'remove', id: piece.id })}
               />
             ))}

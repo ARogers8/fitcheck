@@ -28,6 +28,19 @@ export async function importPiece(body) {
   return data;
 }
 
+/** Cuts the piece out of one specific photo the user picked. */
+export async function recutPiece(body) {
+  const res = await fetch(`${API_BASE}/api/recut`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ error: `Re-cut failed (${res.status}).` }));
+  if (!res.ok) throw new Error(data.error || `Re-cut failed (${res.status}).`);
+  if (data.textures?.front) data.textures.front.url = fromApi(data.textures.front.url);
+  return data;
+}
+
 /** Shrinks an uploaded photo and returns it as a data URL. */
 export function fileToDataUrl(file, max = 1400) {
   return new Promise((resolve, reject) => {

@@ -1,5 +1,18 @@
+// Where the Fitcheck server lives. Empty means same origin (local dev, or the
+// server hosting the app). A static host like GitHub Pages sets VITE_API_URL.
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const onStaticHost = !API_BASE && /\.github\.io$/.test(window.location.hostname);
+
+/** Makes a server path ("/cache/x.png") absolute against the API host. */
+const fromApi = (path) => (path && path.startsWith('/') ? `${API_BASE}${path}` : path);
+
 export async function importPiece(body) {
-  const res = await fetch('/api/import', {
+  if (onStaticHost) {
+    const err = new Error('Reading product links needs the Fitcheck server, and this copy of the site isn’t connected to one yet.');
+    err.status = 503;
+    throw err;
+  }
+  const res = await fetch(`${API_BASE}/api/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -11,6 +24,7 @@ export async function importPiece(body) {
     err.status = res.status;
     throw err;
   }
+  for (const side of ['front', 'back']) if (data.textures?.[side]) data.textures[side].url = fromApi(data.textures[side].url);
   return data;
 }
 
@@ -33,7 +47,7 @@ export function fileToDataUrl(file, max = 1400) {
   });
 }
 
-export const proxied = (url, ref) => `/api/image?url=${encodeURIComponent(url)}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}`;
+export const proxied = (url, ref) => `${API_BASE}/api/image?url=${encodeURIComponent(url)}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}`;
 
 export function formatPrice(price, currency) {
   if (price == null || Number.isNaN(price)) return '';

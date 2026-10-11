@@ -1,7 +1,8 @@
 // Builds the 3D shape of a garment on the avatar and maps its product photo onto it.
 import * as THREE from 'three';
-import { tubeGeometry, torsoRings, limbRings, footRings, LANDMARKS as L } from '../body/geometry.js';
+import { tubeGeometry, torsoRings, limbRings, footRings } from '../body/geometry.js';
 import { KIND_EASE } from '../fit/sizes.js';
+import { LANDMARKS } from '../body/measurements.js';
 
 const LAYER = { base: 0.004, mid: 0.012, outer: 0.022, bottom: 0.003, dress: 0.005, shoes: 0.008, hat: 0.006 };
 const SLEEVES = {
@@ -27,6 +28,21 @@ function style(title = '') {
   };
 }
 
+// Hem heights below are written against the classic proportions (LANDMARKS) and mapped
+// onto the measured body's own landmarks, so a tee still ends just below the hips.
+const OLD_KEYS = ['ankle', 'knee', 'crotch', 'hip', 'waist', 'bust', 'armpit', 'shoulder', 'neckBase', 'top'];
+function remapper(L) {
+  const from = [0, ...OLD_KEYS.map((k) => LANDMARKS[k])];
+  const to = [0, ...OLD_KEYS.map((k) => L[k])];
+  return (f) => {
+    if (f <= 0) return f;
+    for (let i = 1; i < from.length; i++) {
+      if (f <= from[i]) return to[i - 1] + ((f - from[i - 1]) / (from[i] - from[i - 1])) * (to[i] - to[i - 1]);
+    }
+    return f;
+  };
+}
+
 /** Radial room (m) for a garment, from its kind, layer and the chosen size. */
 function roomFor(piece, fit) {
   const easeCm = Math.max(-2, (KIND_EASE[piece.kind] ?? 6) + (fit?.ease ?? 0));
@@ -39,6 +55,8 @@ function roomFor(piece, fit) {
  */
 export function garmentParts(rig, piece, fit) {
   const kind = piece.kind;
+  const L = rig.L;
+  const at = remapper(L);
   const st = style(piece.title);
   const H = rig.H;
   const room = roomFor(piece, fit);
@@ -58,7 +76,7 @@ export function garmentParts(rig, piece, fit) {
         r.rx = Math.max(r.rx, hip.rx + top + drop * flare);
         r.rzF = Math.max(r.rzF, hip.rzF + top + drop * flare * 0.7);
         r.rzB = Math.max(r.rzB, hip.rzB + top + drop * flare * 0.7);
-        r.c.z = 0;
+        r.c.z = hip.cz;
       }
     }
     return rings;
@@ -72,6 +90,7 @@ export function garmentParts(rig, piece, fit) {
     let hem = { tee: 0.47, longsleeve: 0.465, tank: 0.48, sweater: 0.475, hoodie: 0.47, jacket: 0.47, coat: 0.3 }[kind];
     if (st.cropped) hem = Math.max(hem, 0.56);
     if (st.longline && kind !== 'coat') hem -= 0.035;
+    hem = at(hem);
     hem = top - (top - hem) * lengthScale;
     const flare = kind === 'coat' ? 0.12 : 0.05;
     const rings = drapeRings(hem, top, flare, 40);
@@ -100,11 +119,12 @@ export function garmentParts(rig, piece, fit) {
       // Collar (or a lowered hood bunched behind the neck).
       const collar = [];
       const hood = kind === 'hoodie';
+      const neckZ = rig.torsoAt(L.neckBase).cz;
       for (let i = 0; i <= 8; i++) {
         const f = THREE.MathUtils.lerp(L.neckBase - 0.012, L.neckBase + (hood ? 0.03 : 0.022), i / 8);
         const bulge = Math.sin((i / 8) * Math.PI);
         collar.push({
-          c: new THREE.Vector3(0, f * H, hood ? -0.02 - bulge * 0.015 : -0.006),
+          c: new THREE.Vector3(0, f * H, neckZ + (hood ? -0.02 - bulge * 0.015 : -0.006)),
           right: new THREE.Vector3(1, 0, 0),
           fwd: new THREE.Vector3(0, 0, 1),
           rx: rig.neckR * (hood ? 2.1 + bulge * 0.5 : 1.55) + room * 0.5,
@@ -139,7 +159,8 @@ export function garmentParts(rig, piece, fit) {
         const o = room + flare * below;
         return st.skinny ? Math.max(0.002, o) : o;
       };
-      const rings = limbRings(leg, 0, Math.min(hemAt, 1), { steps: 34, offset });
+      // Legs start just above the crotch; the body part covers the pelvis above that.
+      const rings = limbRings(leg, Math.max(0, leg.crotchAt - 0.01), Math.min(hemAt, 1), { steps: 34, offset });
       if (hemAt > 1) {
         // Extend past the ankle, puddling slightly over the shoe.
         const last = rings[rings.length - 1];
@@ -162,7 +183,7 @@ export function garmentParts(rig, piece, fit) {
     }
   } else if (kind === 'skirt' || kind === 'dress') {
     const top = kind === 'skirt' ? L.waist - 0.01 : st.longSleeve || st.shortSleeve ? L.neckBase - 0.008 : L.armpit + 0.012;
-    let hem = st.mini ? 0.4 : st.midi ? 0.2 : st.maxi ? 0.045 : 0.31;
+    let hem = at(st.mini ? 0.4 : st.midi ? 0.2 : st.maxi ? 0.045 : 0.31);
     hem = top - (top - hem) * lengthScale;
     const flare = st.mini ? 0.12 : st.maxi ? 0.14 : 0.18;
     add('body', 0, drapeRings(hem, top, flare, 44), { segments: 64 });
@@ -189,32 +210,37 @@ export function garmentParts(rig, piece, fit) {
     yHem = 0;
   } else if (kind === 'hat') {
     const h = rig.head;
+    // Crown follows the measured skull (plus hair pressed under it), closing over the top.
     const rings = [];
-    const from = st.cap || st.bucket ? 0.05 : -0.05;
+    const y0 = h.eyeY + (st.cap || st.bucket ? 0.034 : 0.026);
+    const y1 = h.y + h.ry;
     for (let i = 0; i <= 18; i++) {
-      const t = THREE.MathUtils.lerp(from, 1, i / 18);
-      const ang = Math.asin(Math.min(1, t));
-      const s = Math.cos(ang);
+      const t = i / 18;
+      const sec = rig.headAt(THREE.MathUtils.lerp(y0, y1, Math.min(t, 0.97)));
+      const shrink = t > 0.9 ? Math.sqrt(Math.max(0, 1 - (t - 0.9) / 0.1)) : 1;
+      const o = room + 0.004;
       rings.push({
-        c: new THREE.Vector3(0, h.y + h.ry * 0.12 + t * (h.ry * 0.95), -0.006),
+        c: new THREE.Vector3(0, THREE.MathUtils.lerp(y0, y1, t) + o * t, h.z),
         right: new THREE.Vector3(1, 0, 0),
         fwd: new THREE.Vector3(0, 0, 1),
-        rx: Math.max(0.002, (h.rx + room) * s * 1.06),
-        rzF: Math.max(0.002, (h.rz + room) * s),
-        rzB: Math.max(0.002, (h.rz + room) * s * 1.04),
+        rx: Math.max(0.002, (sec.rx + o) * shrink),
+        rzF: Math.max(0.002, (sec.rzF + o) * shrink),
+        rzB: Math.max(0.002, (sec.rzB + o) * shrink),
         n: 2,
+        hull: sec.hull.map((r) => r * shrink),
+        base: { rx: sec.rx * shrink, rzF: sec.rzF * shrink, rzB: sec.rzB * shrink },
       });
     }
     add('hat', 0, rings, { segments: 40, capEnd: true });
     if (st.cap || st.bucket) {
       const brim = new THREE.CylinderGeometry(1, 1, 0.006, 40, 1);
       brim.scale(h.rx * (st.bucket ? 1.6 : 1.15), 1, h.rz * (st.bucket ? 1.6 : 1.5));
-      brim.translate(0, h.y + h.ry * 0.12, st.bucket ? 0 : h.rz * 0.55);
+      brim.translate(0, h.eyeY + 0.034, h.z + (st.bucket ? 0 : h.rz * 0.55));
       brim.setAttribute('aLocal', new THREE.Float32BufferAttribute(new Float32Array(brim.attributes.position.count * 3).fill(0), 3));
       parts.push({ role: 'brim', side: 0, geometry: brim });
     }
     yTop = h.y + h.ry * 1.1;
-    yHem = h.y;
+    yHem = y0;
   }
 
   return { parts, yTop, yHem };

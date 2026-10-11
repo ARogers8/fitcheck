@@ -1,11 +1,13 @@
-// Procedural body and garment geometry.
+// Garment fitting geometry.
 //
-// The body is a set of "tubes": stacks of rounded cross-sections (rings) along a
-// path - torso, neck, arms, legs, feet. Garments are built from the same rings,
-// pushed outward by the garment's ease and cut to the garment's extent, so every
-// piece follows the body exactly and stays aligned when height or weight change.
+// The realistic body (human.js) is measured into a "rig": landmark heights and stacks
+// of cross-sections (rings) along the torso, arms, legs and feet, each with the body's
+// convex outline. Garments are built from the same rings, pushed outward by the
+// garment's ease and cut to the garment's extent, so every piece follows the body and
+// stays aligned when sex, height or weight change.
 import * as THREE from 'three';
 import { bodyMeasurements, LANDMARKS as L } from './measurements.js';
+import { buildHuman, surfaceSamples } from './human.js';
 
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
@@ -15,155 +17,325 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 const spow = (v, p) => Math.sign(v) * Math.abs(v) ** p;
 
-/** Catmull-Rom through keyframes [{at, ...values}], sampled at `at`. */
-function sampleKeys(keys, at, fields) {
-  if (at <= keys[0].at) return pick(keys[0], fields);
-  if (at >= keys[keys.length - 1].at) return pick(keys[keys.length - 1], fields);
-  let i = 0;
-  while (keys[i + 1].at < at) i++;
-  const k0 = keys[Math.max(0, i - 1)];
-  const k1 = keys[i];
-  const k2 = keys[i + 1];
-  const k3 = keys[Math.min(keys.length - 1, i + 2)];
-  const t = (at - k1.at) / (k2.at - k1.at);
-  const out = {};
-  for (const f of fields) {
-    const p0 = k0[f], p1 = k1[f], p2 = k2[f], p3 = k3[f];
-    // Uniform Catmull-Rom, clamped so it never overshoots between keys.
-    const v =
-      0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-    out[f] = Math.min(Math.max(v, Math.min(p1, p2) * 0.97), Math.max(p1, p2) * 1.03);
+const HULL_K = 64;
+
+/**
+ * Convex outline of 2D points (x across, z front) around the origin, as radii at
+ * HULL_K angles (angle 0 = +z/front, pi/2 = +x). Fabric stretched over a body follows
+ * its convex hull, so garment shells built on it never cut into the body.
+ */
+function hullProfile(xs, zs) {
+  const K = HULL_K;
+  const h = new Float32Array(K);
+  for (let j = 0; j < K; j++) {
+    const th = (j / K) * Math.PI * 2;
+    const sx = Math.sin(th), cz = Math.cos(th);
+    let m = -Infinity;
+    for (let i = 0; i < xs.length; i++) m = Math.max(m, xs[i] * sx + zs[i] * cz);
+    h[j] = m;
   }
+  const r = new Float32Array(K);
+  for (let k = 0; k < K; k++) {
+    let best = Infinity;
+    for (let j = 0; j < K; j++) {
+      const c = Math.cos(((k - j) / K) * Math.PI * 2);
+      if (c > 0.25 && h[j] > 0) best = Math.min(best, h[j] / c);
+    }
+    r[k] = isFinite(best) ? best : 0;
+  }
+  // Directions with no body (centre outside the outline) borrow from their neighbours.
+  const valid = [...r].map((v) => v > 0.004);
+  if (valid.some(Boolean)) {
+    for (let k = 0; k < K; k++) {
+      if (valid[k]) continue;
+      let a = k, b = k, da = 0, db = 0;
+      while (!valid[(a + K) % K]) { a--; da++; }
+      while (!valid[b % K]) { b++; db++; }
+      r[k] = (r[(a + K) % K] * db + r[b % K] * da) / (da + db);
+    }
+  }
+  return r;
+}
+
+/** Radius of a hull profile at angle th (radians), linearly interpolated. */
+export function hullAt(hull, th) {
+  const K = hull.length;
+  let f = ((th / (Math.PI * 2)) % 1) * K;
+  if (f < 0) f += K;
+  const i = Math.floor(f) % K;
+  const t = f - Math.floor(f);
+  return hull[i] * (1 - t) + hull[(i + 1) % K] * t;
+}
+
+function lerpHull(a, b, t) {
+  const out = new Float32Array(a.length);
+  for (let k = 0; k < a.length; k++) out[k] = a[k] + (b[k] - a[k]) * t;
   return out;
 }
-const pick = (k, fields) => Object.fromEntries(fields.map((f) => [f, k[f]]));
 
-/** Half-width and depth for an ellipse with circumference c (m) and depth/width ratio k. */
-function ellipse(c, k) {
-  const rx = c / (Math.PI * (1 + k));
-  return { rx, rz: rx * k };
+/** Cross-section of a set of 2D points: extents plus convex outline around (0, cz). */
+function section(xs, zs, centerZ) {
+  let rx = 0, zMin = Infinity, zMax = -Infinity;
+  for (let i = 0; i < xs.length; i++) {
+    rx = Math.max(rx, Math.abs(xs[i]));
+    zMin = Math.min(zMin, zs[i]);
+    zMax = Math.max(zMax, zs[i]);
+  }
+  const cz = centerZ ?? (zMin + zMax) / 2;
+  const hull = hullProfile(xs, zs.map((z) => z - cz));
+  return { rx, rzF: zMax - cz, rzB: cz - zMin, cz, hull };
 }
 
-/** Everything needed to build the body and fit garments to it, in metres. */
+/**
+ * Everything needed to fit garments to the body, in metres, measured from the posed
+ * realistic body mesh (see human.js): landmark heights, torso cross-sections, arm and
+ * leg paths with their cross-sections, feet and head.
+ */
 export function makeRig(avatar) {
   const m = bodyMeasurements(avatar);
   const H = m.heightCm / 100;
-  const cm = (v) => v / 100;
   const female = avatar.sex === 'female';
+  const body = buildHuman(avatar);
+  // Measure on points sampled densely over the surface (the base mesh is sparse on limbs).
+  const { P, labels: lab, count: nb } = surfaceSamples(body, 3);
+  const J = (n) => body.joint(n);
 
-  const hip = ellipse(cm(m.hip), female ? 0.78 : 0.72);
-  const waist = ellipse(cm(m.waist), female ? 0.72 : 0.78);
-  const chest = ellipse(cm(m.chest), female ? 0.62 : 0.66);
-  const under = ellipse(cm(m.underbust), 0.7);
-  const neckR = cm(m.neck) / (2 * Math.PI);
-  const shoulderHalf = cm(m.shoulderWidth) / 2;
+  // ---- landmarks
+  const hipJ = J('upperleg01.L');
+  const S = J('upperarm01.L');
+  let crotch = Infinity, chin = Infinity, shoulderTop = -Infinity;
+  const eye = J('eye.L');
+  for (let i = 0; i < nb; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+    const l = lab[i];
+    if (Math.abs(x) < 0.006 && l === 0 && y < hipJ.y) crotch = Math.min(crotch, y);
+    if (l === 2 && Math.abs(x) < 0.012 && z > eye.z - 0.03) chin = Math.min(chin, y);
+    if ((l === 0 || l === 3) && Math.abs(x - S.x) < 0.02 && y < S.y + 0.1) shoulderTop = Math.max(shoulderTop, y);
+  }
+  const neckBaseY = J('neck01').y - 0.012 * (H / 1.75);
 
-  // Torso keyframes from crotch to neck: half-width, front depth, back depth, z-centre.
-  const torsoKeys = [
-    // The pelvis rounds off into the legs instead of ending in a flat "hem".
-    // Below the hip line the torso tucks inside the leg tops (which form the lower pelvis).
-    { at: L.crotch, rx: hip.rx * 0.3, rzF: hip.rz * 0.25, rzB: hip.rz * 0.3, cz: -0.006 },
-    { at: (L.crotch + L.hip) / 2, rx: hip.rx * 0.62, rzF: hip.rz * 0.48, rzB: hip.rz * 0.65, cz: -0.004 },
-    { at: L.hip, rx: hip.rx, rzF: hip.rz * 0.76, rzB: hip.rz * (female ? 1.15 : 1.05), cz: 0 },
-    { at: (L.hip + L.waist) / 2, rx: lerp(hip.rx, waist.rx, 0.55), rzF: lerp(hip.rz, waist.rz, 0.6) * 0.95, rzB: lerp(hip.rz, waist.rz, 0.6) * 1.0, cz: 0 },
-    { at: L.waist, rx: waist.rx, rzF: waist.rz * 1.02, rzB: waist.rz * 0.95, cz: 0 },
-    { at: (L.waist + L.bust) / 2, rx: lerp(waist.rx, female ? under.rx : chest.rx, 0.6), rzF: lerp(waist.rz, under.rz, 0.6), rzB: lerp(waist.rz, under.rz, 0.6) * 0.95, cz: 0 },
-    { at: L.bust, rx: chest.rx, rzF: chest.rz * (female ? 1.3 : 1.05), rzB: chest.rz * (female ? 0.85 : 0.98), cz: 0 },
-    { at: L.armpit, rx: Math.max(chest.rx * 0.98, shoulderHalf * 0.84), rzF: chest.rz * (female ? 1.0 : 0.98), rzB: chest.rz * 0.95, cz: 0 },
-    { at: L.shoulder - 0.022, rx: shoulderHalf * 0.86, rzF: chest.rz * 0.8, rzB: chest.rz * 0.82, cz: -0.003 },
-    // Trapezius: the shoulder line slopes up into the neck.
-    { at: L.shoulder - 0.004, rx: shoulderHalf * 0.74, rzF: chest.rz * 0.6, rzB: chest.rz * 0.66, cz: -0.005 },
-    { at: L.shoulder + 0.01, rx: shoulderHalf * 0.5, rzF: neckR * 1.3, rzB: neckR * 1.6, cz: -0.007 },
-    { at: L.neckBase, rx: neckR * 1.45, rzF: neckR * 1.05, rzB: neckR * 1.2, cz: -0.007 },
-    { at: L.neckBase + 0.01, rx: neckR * 1.05, rzF: neckR, rzB: neckR * 1.05, cz: -0.006 },
-  ];
+  // ---- torso sections from below the crotch to above the neck base
+  const yLo = crotch - 0.02, yHi = neckBaseY + 0.05;
+  const N = 110;
+  const dy = (yHi - yLo) / N;
+  const buckets = Array.from({ length: N + 1 }, () => ({ xs: [], zs: [] }));
+  // Above the armpits the shoulder caps belong to the torso shell (where a shoulder seam sits).
+  const capY = S.y - 0.045 * (H / 1.75);
+  for (let i = 0; i < nb; i++) {
+    const l = lab[i];
+    const y = P[i * 3 + 1];
+    if (l === 2 || ((l === 3 || l === 4) && y < capY)) continue;
+    if (y < yLo - dy || y > yHi + dy) continue;
+    const b = Math.round((y - yLo) / dy);
+    for (const k of [b - 1, b, b + 1]) {
+      if (k < 0 || k > N) continue;
+      buckets[k].xs.push(P[i * 3]);
+      buckets[k].zs.push(P[i * 3 + 2]);
+    }
+  }
+  const slices = buckets.map((b, k) => ({ y: yLo + k * dy, ...section(b.xs, b.zs) }));
+  for (let k = 0; k <= N; k++) if (!slices[k].hull || !isFinite(slices[k].rzF)) slices[k] = { ...slices[Math.max(0, k - 1)], y: yLo + k * dy };
+
+  // widest hip, narrowest waist, fullest bust
+  const widthAt = (y) => slices[Math.min(N, Math.max(0, Math.round((y - yLo) / dy)))];
+  let hipY = hipJ.y, best = 0;
+  for (let y = crotch + 0.05 * (H / 1.75); y < crotch + 0.14 * (H / 1.75); y += dy) if (widthAt(y).rx > best) { best = widthAt(y).rx; hipY = y; }
+  const armpitY = S.y - 0.075 * (H / 1.75);
+  let bustY = armpitY - 0.06, front = -Infinity;
+  for (let y = armpitY - 0.16; y < armpitY - 0.01; y += dy) {
+    const sl = widthAt(y);
+    if (sl.cz + sl.rzF > front) { front = sl.cz + sl.rzF; bustY = y; }
+  }
+  let waistY = (hipY + bustY) / 2, narrow = Infinity;
+  for (let y = hipY + 0.06; y < bustY - 0.06; y += dy) if (widthAt(y).rx < narrow) { narrow = widthAt(y).rx; waistY = y; }
+
+  const Lm = {
+    ankle: J('foot.L').y / H,
+    knee: J('lowerleg01.L').y / H,
+    crotch: crotch / H,
+    hip: hipY / H,
+    waist: waistY / H,
+    bust: bustY / H,
+    armpit: armpitY / H,
+    shoulder: shoulderTop / H,
+    neckBase: neckBaseY / H,
+    chin: chin / H,
+    top: 1,
+  };
+
   const torsoAt = (frac) => {
-    const v = sampleKeys(torsoKeys, frac, ['rx', 'rzF', 'rzB', 'cz']);
-    return { ...v, y: frac * H };
+    const f = ((frac * H - yLo) / dy);
+    const i = Math.min(N - 1, Math.max(0, Math.floor(f)));
+    const t = Math.min(1, Math.max(0, f - i));
+    const a = slices[i], b = slices[i + 1];
+    return {
+      rx: lerp(a.rx, b.rx, t),
+      rzF: lerp(a.rzF, b.rzF, t),
+      rzB: lerp(a.rzB, b.rzB, t),
+      cz: lerp(a.cz, b.cz, t),
+      hull: lerpHull(a.hull, b.hull, t),
+      y: frac * H,
+    };
   };
 
-  // Arms hang in a relaxed A-pose.
-  const armAngle = THREE.MathUtils.degToRad(female ? 11 : 12);
-  const upperLen = 0.183 * H;
-  const foreLen = 0.158 * H;
-  const handLen = 0.105 * H;
-  const upperR = cm(m.upperArm) / (2 * Math.PI);
-  const foreR = cm(m.forearm) / (2 * Math.PI);
-  const wristR = cm(m.wrist) / (2 * Math.PI);
+  // ---- limbs: sections perpendicular to the bone path
+  const limbSections = (joints, select, count) => {
+    const out = [];
+    const { total } = alongPath(joints, 0);
+    // Slab around each section: thick enough to be a slightly conservative envelope.
+    const half = Math.max(0.012, (total / count) * 0.8);
+    const pts = [];
+    for (let i = 0; i < nb; i++) if (select(i)) pts.push(new THREE.Vector3(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]));
+    const v = new THREE.Vector3();
+    for (let k = 0; k <= count; k++) {
+      const at = k / count;
+      const { pos, axis } = alongPath(joints, at);
+      const { right, fwd } = frameFor(axis);
+      const xs = [], zs = [];
+      for (const p of pts) {
+        v.subVectors(p, pos);
+        const along = v.dot(axis);
+        if (Math.abs(along) > half) continue;
+        const x = v.dot(right), z = v.dot(fwd);
+        if (x * x + z * z > 0.0225) continue;
+        xs.push(x);
+        zs.push(z);
+      }
+      if (xs.length < 3) {
+        out.push(out.length ? { ...out[out.length - 1], at } : { at, rx: 0.03, rzF: 0.03, rzB: 0.03, hull: new Float32Array(HULL_K).fill(0.03) });
+        continue;
+      }
+      const sec = section(xs, zs, 0);
+      out.push({ at, rx: sec.rx, rzF: sec.rzF, rzB: sec.rzB, hull: sec.hull });
+    }
+    return out;
+  };
+
   const arm = (side) => {
-    const shoulder = new THREE.Vector3(side * (shoulderHalf - upperR * 1.05), L.shoulder * H - upperR * 0.2, -0.004);
-    const dirUpper = new THREE.Vector3(side * Math.sin(armAngle), -Math.cos(armAngle), 0);
-    const elbow = shoulder.clone().addScaledVector(dirUpper, upperLen);
-    const dirFore = new THREE.Vector3(side * Math.sin(armAngle * 0.7), -Math.cos(armAngle * 0.7), 0.06).normalize();
-    const wrist = elbow.clone().addScaledVector(dirFore, foreLen);
-    const total = upperLen + foreLen;
-    const e = upperLen / total;
-    return {
-      side,
-      joints: [shoulder, elbow, wrist],
-      dir: dirFore,
-      handLen,
-      keys: [
-        // Rounded deltoid cap that tucks into the shoulder.
-        { at: 0, rx: upperR * 0.55, rz: upperR * 0.6 },
-        { at: e * 0.07, rx: upperR * 1.18, rz: upperR * 1.12 },
-        { at: e * 0.25, rx: upperR * 1.14, rz: upperR * 1.05 },
-        { at: e * 0.6, rx: upperR, rz: upperR * 0.95 },
-        { at: e, rx: foreR * 0.86, rz: foreR * 0.8 },
-        { at: e + (1 - e) * 0.3, rx: foreR * 1.02, rz: foreR * 0.9 },
-        { at: 1, rx: wristR * 1.12, rz: wristR * 0.8 },
-      ],
-      upperFrac: e,
-    };
+    const s = side > 0 ? 'L' : 'R';
+    const joints = [J(`upperarm01.${s}`), J(`lowerarm01.${s}`), J(`wrist.${s}`)];
+    const armLabel = side > 0 ? 3 : 4;
+    const sections = limbSections(joints, (i) => lab[i] === armLabel, 40);
+    const e = joints[0].distanceTo(joints[1]) / (joints[0].distanceTo(joints[1]) + joints[1].distanceTo(joints[2]));
+    return { side, joints, sections, upperFrac: e, dir: joints[2].clone().sub(joints[1]).normalize(), handLen: J(`finger3-1.${s}`).distanceTo(joints[2]) * 2 };
   };
 
-  const thighR = cm(m.thigh) / (2 * Math.PI);
-  const kneeR = cm(m.knee) / (2 * Math.PI);
-  const calfR = cm(m.calf) / (2 * Math.PI);
-  const ankleR = cm(m.ankle) / (2 * Math.PI);
   const leg = (side) => {
-    // The leg tops start at hip height and together form the lower pelvis, so the
-    // torso flows into the thighs without a ledge.
-    const hipJ = new THREE.Vector3(side * hip.rx * 0.47, (L.hip + 0.03) * H, 0);
-    const knee = new THREE.Vector3(side * Math.max(kneeR * 1.15, hip.rx * 0.36), L.knee * H, 0.004);
-    const ankle = new THREE.Vector3(side * Math.max(ankleR * 1.6, hip.rx * 0.34), L.ankle * H + ankleR * 0.3, -0.006);
-    const thighLen = hipJ.distanceTo(knee);
-    const total = thighLen + knee.distanceTo(ankle);
-    const k = thighLen / total;
-    const crotchAt = (hipJ.y - L.crotch * H) / total;
-    const hipAt = (hipJ.y - L.hip * H) / total;
-    return {
-      side,
-      joints: [hipJ, knee, ankle],
-      keys: [
-        { at: 0, rx: hip.rx * 0.45, rzF: hip.rz * 0.6, rzB: hip.rz * 0.8 },
-        { at: hipAt, rx: hip.rx * 0.56, rzF: hip.rz * 0.76, rzB: hip.rz * (female ? 1.12 : 1.02) },
-        { at: (hipAt + crotchAt) / 2, rx: lerp(hip.rx * 0.56, thighR * 1.08, 0.5), rzF: lerp(hip.rz * 0.76, thighR, 0.6), rzB: lerp(hip.rz * (female ? 1.08 : 1.0), thighR * 1.12, 0.5) },
-        { at: crotchAt, rx: thighR * 1.06, rzF: thighR, rzB: thighR * 1.1 },
-        { at: k * 0.55, rx: thighR * 0.86, rzF: thighR * 0.86, rzB: thighR * 0.86 },
-        { at: k, rx: kneeR, rzF: kneeR, rzB: kneeR * 0.95 },
-        { at: k + (1 - k) * 0.28, rx: calfR * 0.95, rzF: calfR * 0.88, rzB: calfR * 1.15 },
-        { at: k + (1 - k) * 0.75, rx: ankleR * 1.15, rzF: ankleR * 1.05, rzB: ankleR * 1.05 },
-        { at: 1, rx: ankleR, rzF: ankleR, rzB: ankleR },
-      ],
-      crotchAt,
-    };
+    const s = side > 0 ? 'L' : 'R';
+    const legLabel = side > 0 ? 5 : 6;
+    const hip = J(`upperleg01.${s}`);
+    // Start the leg path at hip height above the hip joint so leg tops reach the pelvis.
+    const top = new THREE.Vector3(hip.x, Math.max(hip.y, hipY) + 0.01, hip.z);
+    const ankle = J(`foot.${s}`);
+    const joints = [top, J(`lowerleg01.${s}`), ankle];
+    const total = joints[0].distanceTo(joints[1]) + joints[1].distanceTo(joints[2]);
+    const crotchAt = (top.y - crotch) / total;
+    const sections = limbSections(joints, (i) => {
+      const l = lab[i];
+      if (l === 3 || l === 4 || l === 2) return false;
+      const x = P[i * 3] * side;
+      if (x <= 0) return false;
+      const y = P[i * 3 + 1];
+      if (y < ankle.y + 0.012) return false; // the foot belongs to the shoe
+      return l === legLabel || y > crotch - 0.01;
+    }, 44);
+    return { side, joints, sections, crotchAt };
+  };
+
+  // ---- feet: profile from heel to toe along each foot's axis
+  const foot = (side) => {
+    const s = side > 0 ? 'L' : 'R';
+    const legLabel = side > 0 ? 5 : 6;
+    const ankle = J(`foot.${s}`);
+    const pts = [];
+    for (let i = 0; i < nb; i++) {
+      if (lab[i] !== legLabel) continue;
+      const y = P[i * 3 + 1];
+      if (y > ankle.y + 0.025) continue;
+      pts.push(new THREE.Vector3(P[i * 3], y, P[i * 3 + 2]));
+    }
+    let heel = pts[0], toe = pts[0];
+    for (const p of pts) {
+      if (p.z < heel.z) heel = p;
+      if (p.z > toe.z) toe = p;
+    }
+    const axis = new THREE.Vector3(toe.x - heel.x, 0, toe.z - heel.z);
+    const len = axis.length();
+    axis.normalize();
+    const right = new THREE.Vector3(axis.z, 0, -axis.x);
+    const origin = new THREE.Vector3(heel.x, 0, heel.z);
+    const bins = 24;
+    const prof = Array.from({ length: bins + 1 }, () => ({ lo: Infinity, hi: -Infinity, top: 0 }));
+    const v = new THREE.Vector3();
+    for (const p of pts) {
+      v.set(p.x - origin.x, 0, p.z - origin.z);
+      const t = v.dot(axis) / len;
+      const b = Math.min(bins, Math.max(0, Math.round(t * bins)));
+      const x = v.dot(right);
+      for (const k of [b - 1, b, b + 1]) {
+        if (k < 0 || k > bins) continue;
+        prof[k].lo = Math.min(prof[k].lo, x);
+        prof[k].hi = Math.max(prof[k].hi, x);
+        prof[k].top = Math.max(prof[k].top, p.y);
+      }
+    }
+    return { side, origin, axis, right, len, prof };
+  };
+
+  const neck = slices[Math.min(N, Math.round((neckBaseY + 0.025 - yLo) / dy))];
+
+  // ---- head (skull, for hats)
+  let hTop = -Infinity, hx = 0, hzMin = Infinity, hzMax = -Infinity;
+  for (let i = 0; i < nb; i++) {
+    if (lab[i] !== 2) continue;
+    const y = P[i * 3 + 1];
+    hTop = Math.max(hTop, y);
+    if (y > eye.y + 0.015) {
+      hx = Math.max(hx, Math.abs(P[i * 3]));
+      hzMin = Math.min(hzMin, P[i * 3 + 2]);
+      hzMax = Math.max(hzMax, P[i * 3 + 2]);
+    }
+  }
+
+  // Skull sections (for hats), around the head's centre depth.
+  const headZ = (hzMax + hzMin) / 2;
+  const HN = 24, hy0 = eye.y - 0.02, hy1 = hTop;
+  const hb = Array.from({ length: HN + 1 }, () => ({ xs: [], zs: [] }));
+  for (let i = 0; i < nb; i++) {
+    if (lab[i] !== 2) continue;
+    const y = P[i * 3 + 1];
+    if (y < hy0) continue;
+    const k = Math.round(((y - hy0) / (hy1 - hy0)) * HN);
+    for (const j of [k - 1, k, k + 1]) {
+      if (j < 0 || j > HN) continue;
+      hb[j].xs.push(P[i * 3]);
+      hb[j].zs.push(P[i * 3 + 2] - headZ);
+    }
+  }
+  const headSecs = hb.map((b) => (b.xs.length > 2 ? section(b.xs, b.zs, 0) : null));
+  for (let k = HN; k >= 0; k--) if (!headSecs[k]) headSecs[k] = headSecs[k + 1] || headSecs[k - 1];
+  const headAt = (y) => {
+    const f = Math.min(HN, Math.max(0, ((y - hy0) / (hy1 - hy0)) * HN));
+    const i = Math.min(HN - 1, Math.floor(f));
+    const t = f - i;
+    const a = headSecs[i], b = headSecs[i + 1];
+    return { rx: lerp(a.rx, b.rx, t), rzF: lerp(a.rzF, b.rzF, t), rzB: lerp(a.rzB, b.rzB, t), hull: lerpHull(a.hull, b.hull, t) };
   };
 
   return {
     H,
     m,
     female,
+    L: Lm,
+    headAt,
     torsoAt,
-    hip,
-    waist,
-    chest,
-    neckR,
-    shoulderHalf,
+    neckR: (neck.rx + (neck.rzF + neck.rzB) / 2) / 2,
+    shoulderHalf: widthAt(armpitY + 0.03).rx,
     arms: [arm(-1), arm(1)],
     legs: [leg(-1), leg(1)],
-    footLen: cm(m.footLength),
-    head: { y: 0.935 * H, rx: 0.043 * H, ry: 0.066 * H, rz: 0.054 * H },
+    feet: { [-1]: foot(-1), 1: foot(1) },
+    footLen: foot(1).len,
+    head: { y: (hTop + chin) / 2, ry: (hTop - chin) / 2, rx: hx, rz: (hzMax - hzMin) / 2, z: headZ, eyeY: eye.y },
   };
 }
 
@@ -201,7 +373,10 @@ function frameFor(axis) {
 }
 
 /**
- * Builds a tube from rings: [{ c: Vector3, right, fwd, rx, rzF, rzB, n }].
+ * Builds a tube from rings: [{ c: Vector3, right, fwd, rx, rzF, rzB, n, hull?, base? }].
+ * Rings measured from the body carry `hull` (its convex outline) and `base` (the body's
+ * own rx/rzF/rzB); the tube then follows the outline, pushed out by however much the
+ * ring's radii exceed the body's (the garment's room, flare, drape).
  * Also writes per-vertex attributes used for garment texturing:
  *   aLocal = (x across the ring -1..1, front/back -1..1, ring fraction 0..1).
  */
@@ -215,12 +390,21 @@ export function tubeGeometry(rings, { segments = 40, capStart = false, capEnd = 
     const p = 2 / (ring.n || 2);
     for (let s = 0; s <= segments; s++) {
       const th = (s / segments) * Math.PI * 2;
-      const sx = spow(Math.sin(th), p);
-      const cz = spow(Math.cos(th), p);
-      const rz = cz >= 0 ? ring.rzF : ring.rzB;
-      const v = ring.c.clone().addScaledVector(ring.right, ring.rx * sx).addScaledVector(ring.fwd, rz * cz);
+      const sn = Math.sin(th), cs = Math.cos(th);
+      const sx = spow(sn, p);
+      let v;
+      if (ring.hull && ring.base) {
+        const ox = ring.rx - ring.base.rx;
+        const oz = cs >= 0 ? ring.rzF - ring.base.rzF : ring.rzB - ring.base.rzB;
+        const rad = hullAt(ring.hull, th) + ox * sn * sn + oz * cs * cs;
+        v = ring.c.clone().addScaledVector(ring.right, rad * sn).addScaledVector(ring.fwd, rad * cs);
+      } else {
+        const cz = spow(cs, p);
+        const rz = cz >= 0 ? ring.rzF : ring.rzB;
+        v = ring.c.clone().addScaledVector(ring.right, ring.rx * sx).addScaledVector(ring.fwd, rz * cz);
+      }
       pos.push(v.x, v.y, v.z);
-      local.push(sx, Math.cos(th), r / (R - 1));
+      local.push(sx, cs, r / (R - 1));
     }
   }
   const row = segments + 1;
@@ -257,7 +441,7 @@ export function torsoRings(rig, fromFrac, toFrac, { steps = 28, offset = () => 0
   const rings = [];
   for (let i = 0; i <= steps; i++) {
     const f = lerp(fromFrac, toFrac, i / steps);
-    const t = rig.torsoAt(Math.max(f, L.crotch));
+    const t = rig.torsoAt(Math.max(f, rig.L.crotch));
     const o = offset(f);
     const w = widen(f);
     rings.push({
@@ -268,9 +452,21 @@ export function torsoRings(rig, fromFrac, toFrac, { steps = 28, offset = () => 0
       rzF: t.rzF * w + o,
       rzB: t.rzB * w + o,
       n,
+      hull: t.hull,
+      base: { rx: t.rx, rzF: t.rzF, rzB: t.rzB },
     });
   }
   return rings;
+}
+
+/** Interpolated cross-section of a limb at path fraction `at`. */
+function limbSection(limb, at) {
+  const secs = limb.sections;
+  const f = clamp01(at) * (secs.length - 1);
+  const i = Math.min(secs.length - 2, Math.floor(f));
+  const t = f - i;
+  const a = secs[i], b = secs[i + 1];
+  return { rx: lerp(a.rx, b.rx, t), rzF: lerp(a.rzF, b.rzF, t), rzB: lerp(a.rzB, b.rzB, t), hull: lerpHull(a.hull, b.hull, t) };
 }
 
 /** Rings along an arm or leg between path fractions a..b. */
@@ -280,60 +476,41 @@ export function limbRings(limb, a, b, { steps = 24, offset = () => 0, n = 2 } = 
     const at = lerp(a, b, i / steps);
     const { pos, axis } = alongPath(limb.joints, at);
     const { right, fwd } = frameFor(axis);
-    const k = sampleKeys(limb.keys, at, limb.keys[0].rzF != null ? ['rx', 'rzF', 'rzB'] : ['rx', 'rz']);
+    const k = limbSection(limb, at);
     const o = offset(at);
-    rings.push({ c: pos, right, fwd, rx: k.rx + o, rzF: (k.rzF ?? k.rz) + o, rzB: (k.rzB ?? k.rz) + o, n });
+    rings.push({ c: pos, right, fwd, rx: k.rx + o, rzF: k.rzF + o, rzB: k.rzB + o, n, hull: k.hull, base: { rx: k.rx, rzF: k.rzF, rzB: k.rzB } });
   }
   return rings;
 }
 
-/** Rings for a foot (or shoe), heel to toe. `o` inflates it for footwear. */
+/** Rings for a foot (or shoe), heel to toe, from the measured foot. `o` inflates it for footwear. */
 export function footRings(rig, leg, o = 0, { sole = 0 } = {}) {
-  const ankle = leg.joints[2];
-  const len = rig.footLen + o * 2.2;
-  const w = rig.footLen * 0.2 + o;
+  const ft = rig.feet[leg.side];
   const rings = [];
   const steps = 22;
+  const B = ft.prof.length - 1;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const z = ankle.z - rig.footLen * 0.24 - o + t * len;
-    // Profile: rounded heel, tall instep behind the ankle, tapering toe box.
-    const width = w * (t < 0.12 ? 0.55 + 3.6 * t : t > 0.88 ? 0.98 - (t - 0.88) * 4.5 : lerp(0.98, 1.08, Math.sin(t * Math.PI)));
-    const height = (t < 0.45 ? lerp(0.075, 0.062, t / 0.45) : lerp(0.062, 0.03, (t - 0.45) / 0.55)) * rig.H * 0.5 + o;
-    const topY = Math.max(0.005, height) + sole;
-    const capT = t < 0.06 ? Math.sqrt(t / 0.06) : t > 0.95 ? Math.sqrt((1 - t) / 0.05) : 1;
+    const pr = ft.prof[Math.min(B, Math.round(t * B))];
+    // Overshoot the heel and toe slightly so the shoe closes around them.
+    const along = -o * 1.1 + t * (ft.len + o * 2.2);
+    const mid = (pr.lo + pr.hi) / 2;
+    const half = Math.max(0.004, (pr.hi - pr.lo) / 2);
+    const capT = t < 0.07 ? Math.sqrt(t / 0.07) : t > 0.94 ? Math.sqrt((1 - t) / 0.06) : 1;
+    const topY = Math.max(0.006, pr.top) + o + sole;
+    const c = ft.origin.clone().addScaledVector(ft.axis, along).addScaledVector(ft.right, mid);
+    c.y = topY * 0.5;
     rings.push({
-      c: new THREE.Vector3(ankle.x + leg.side * 0.004 * t, topY * 0.5, z),
-      right: X,
+      c,
+      right: ft.right,
       fwd: Y,
-      rx: Math.max(0.002, width * capT),
-      rzF: Math.max(0.002, (topY * 0.5) * capT),
-      rzB: Math.max(0.002, (topY * 0.5) * capT),
+      rx: Math.max(0.002, (half + o) * capT),
+      rzF: Math.max(0.002, topY * 0.5 * capT),
+      rzB: Math.max(0.002, topY * 0.5 * capT),
       n: 3,
     });
   }
   return rings;
-}
-
-/** All body meshes for the avatar, as { name, geometry } list. */
-export function bodyGeometries(rig) {
-  const parts = [];
-  parts.push({ name: 'torso', geometry: tubeGeometry(torsoRings(rig, L.crotch, L.neckBase + 0.01, { steps: 48 }), { segments: 56, capStart: true }) });
-  // Neck to the base of the skull.
-  const neck = [];
-  for (let i = 0; i <= 6; i++) {
-    const f = lerp(L.neckBase + 0.005, 0.9, i / 6);
-    neck.push({ c: new THREE.Vector3(0, f * rig.H, -0.006 - i * 0.001), right: X, fwd: Z, rx: rig.neckR * 1.02, rzF: rig.neckR * 0.98, rzB: rig.neckR * 1.02, n: 2 });
-  }
-  parts.push({ name: 'neck', geometry: tubeGeometry(neck, { segments: 32 }) });
-  for (const arm of rig.arms) {
-    parts.push({ name: `arm${arm.side}`, geometry: tubeGeometry(limbRings(arm, 0, 1, { steps: 36 }), { segments: 32, capStart: true, capEnd: true }) });
-  }
-  for (const leg of rig.legs) {
-    parts.push({ name: `leg${leg.side}`, geometry: tubeGeometry(limbRings(leg, 0, 1, { steps: 40 }), { segments: 36, capStart: true, capEnd: true }) });
-    parts.push({ name: `foot${leg.side}`, geometry: tubeGeometry(footRings(rig, leg), { segments: 28, capStart: true, capEnd: true }) });
-  }
-  return parts;
 }
 
 export { L as LANDMARKS, alongPath };

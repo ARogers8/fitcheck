@@ -94,3 +94,22 @@ client/   React + three.js (react-three-fiber) app
 ```
 
 `npm test` runs the server tests (page parsing, garment type detection, cut-outs).
+
+## The body model
+
+The 3D person is built from [MakeHuman](https://github.com/makehumancommunity/makehuman)
+1.1 assets, which their authors released under **CC0** (public domain) in 2020: the
+hm08 base mesh, its macro targets (sex, height, weight, muscle, the default ethnic mix
+and "ideal proportions"), a couple of lip targets, the default skeleton weights and the
+high-poly eyes with their brown eye texture. Thanks to the MakeHuman team.
+
+`scripts/build-human.py` turns those files into the compact data the app loads
+(`client/public/human/`: `human.bin`, `human.json`, `eye.png`, about 3.3 MB, 1.8 MB
+gzipped). The client morphs the mesh for your sex, height and weight, lowers the arms
+from MakeHuman's A-pose, smooths it (one Catmull-Clark step) and measures it so garments
+fit the actual body. Skin details (lips, brows, stubble, scalp, underwear), eyelashes and
+hair are procedural. To rebuild the data from a MakeHuman checkout:
+
+```bash
+python3 -I scripts/build-human.py /path/to/makehuman/makehuman/data client/public/human
+```

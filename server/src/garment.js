@@ -23,8 +23,21 @@ function isSkin(r, g, b) {
   const y = 0.299 * r + 0.587 * g + 0.114 * b;
   const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
   const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  return y > 50 && cb >= 77 && cb <= 127 && cr >= 137 && cr <= 173 && r > g && r > b;
+  // r - g > 14 keeps cream, ivory and off-white knits (r ≈ g) out: real skin of
+  // every tone has red well above green.
+  return y > 50 && cb >= 77 && cb <= 127 && cr >= 139 && cr <= 173 && r - g > 14 && r > b;
 }
+
+// Store image URLs often say what kind of shot they are: Zara's packshots end in
+// "-p", others use words like packshot / flat / still / product.
+const PACKSHOT_URL = /(?:[-_]p(?:[-_]\d+)?\.(?:jpe?g|png|webp|avif)|packshot|flat[-_]?lay|[-_]flat|[-_]still|[-_]ghost|[-_]prod(?:uct)?[-_.])/i;
+const MODEL_URL = /(?:[-_](?:e|a|m)\d+\.(?:jpe?g|png|webp|avif)|model|look|editorial|lifestyle|campaign)/i;
+export const urlShotHint = (url = '') => {
+  const u = url.split('?')[0];
+  if (PACKSHOT_URL.test(u)) return 'flat';
+  if (MODEL_URL.test(u)) return 'model';
+  return null;
+};
 
 function median(values) {
   if (!values.length) return 0;
@@ -267,6 +280,11 @@ export async function buildGarment(photos, kind, hints = []) {
   const hintFor = (idx) => hints.find((h) => h.index === idx);
   for (const p of analyzed) {
     const hint = hintFor(p.index);
+    const fromUrl = urlShotHint(p.url);
+    // A URL that says "packshot" wins over a borderline pixel read, as long as the
+    // photo really has a plain backdrop and something in the middle of it.
+    if (fromUrl === 'flat' && p.a.uniform > 0.6 && p.a.fgFrac > 0.05) p.a.packshot = true;
+    if (fromUrl === 'model' && p.a.packshot && p.a.skinFrac > 0.035) p.a.packshot = false;
     if (hint?.shot === 'flat' || hint?.shot === 'ghost') p.a.packshot = true;
     if (hint?.shot === 'model') p.a.packshot = false;
     p.view = hint?.view || null;
@@ -275,7 +293,13 @@ export async function buildGarment(photos, kind, hints = []) {
   }
 
   const usable = analyzed.filter((p) => p.usable);
-  const rank = (p) => (p.a.packshot ? 0 : 1) + (p.view === 'front' ? 0 : p.view ? 0.5 : 0.25);
+  // Every photo gets a score: product-only shots first, then model shots on a
+  // plain studio backdrop, and street/lifestyle photos last. Within a group, a
+  // known front view beats an unknown one, and less visible skin beats more.
+  const rank = (p) =>
+    (p.a.packshot ? 0 : p.a.uniform > 0.7 ? 1 : 2) +
+    (p.view === 'front' ? 0 : p.view ? 0.5 : 0.25) +
+    Math.min(0.2, p.a.skinFrac);
   const front = [...usable].sort((x, y) => rank(x) - rank(y) || x.index - y.index)[0] || analyzed[0];
 
   let back = usable.find((p) => p !== front && p.view === 'back');

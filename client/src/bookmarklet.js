@@ -53,24 +53,35 @@ function collect() {
   });
 
   var words = out.title.toLowerCase().split(/[^a-z0-9]+/).filter(function (w) { return w.length > 2; });
-  q('img').forEach(function (el) {
-    var alt = (el.alt || '').toLowerCase();
-    var gallery = el.closest('[class*="gallery" i],[class*="carousel" i],[class*="product" i],[class*="media" i],[class*="image" i]');
-    var hits = words.filter(function (w) { return alt.indexOf(w) >= 0; }).length;
-    if (el.naturalWidth < 300 || !(gallery || hits >= 2)) return;
-    var best = el.currentSrc || el.src;
-    if (el.srcset) {
-      var top = 0;
-      el.srcset.split(',').forEach(function (p) {
+  // Galleries lazy-load: photos further down are often not loaded yet (no
+  // naturalWidth, a placeholder src), so read every candidate URL the element
+  // carries, srcset, data-src and <picture><source> included, and keep the widest.
+  var pick = function (list) {
+    var best = '', top = -1;
+    list.forEach(function (set) {
+      (set || '').split(/,\s+(?=\S)/).forEach(function (p) {
         var bits = p.trim().split(/\s+/);
+        if (!bits[0] || /^data:/.test(bits[0])) return;
         var w = parseInt(bits[1], 10) || 0;
         if (w > top) { top = w; best = bits[0]; }
       });
-    }
-    if (best && !/\.svg|logo|icon|sprite/i.test(best)) out.images.push(best);
+    });
+    return best;
+  };
+  q('img').forEach(function (el) {
+    var alt = (el.alt || '').toLowerCase();
+    var gallery = el.closest('[class*="gallery" i],[class*="carousel" i],[class*="product" i],[class*="media" i],[class*="image" i],[class*="slider" i]');
+    var hits = words.filter(function (w) { return alt.indexOf(w) >= 0; }).length;
+    if (!(gallery || hits >= 2)) return;
+    if (el.complete && el.naturalWidth && el.naturalWidth < 200) return;
+    var sets = [el.getAttribute('srcset'), el.getAttribute('data-srcset'), el.getAttribute('data-src'), el.getAttribute('data-zoom-image'), el.getAttribute('data-large'), el.currentSrc, el.getAttribute('src')];
+    var pic = el.closest('picture');
+    if (pic) Array.prototype.forEach.call(pic.querySelectorAll('source'), function (s) { sets.unshift(s.getAttribute('srcset') || s.getAttribute('data-srcset')); });
+    var best = pick(sets);
+    if (best && !/\.svg|logo|icon|sprite|placeholder|transparent/i.test(best)) out.images.push(best);
   });
   out.images = out.images.filter(Boolean).map(function (u) { return new URL(u, location.href).href; })
-    .filter(function (u, i, a) { return a.indexOf(u) === i; }).slice(0, 16);
+    .filter(function (u, i, a) { return a.indexOf(u) === i; }).slice(0, 24);
   return out;
 }
 

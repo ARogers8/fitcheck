@@ -143,7 +143,7 @@ export async function scrapeProduct(rawUrl) {
 }
 
 /** Downloads product photos (http URLs or data: URLs from manual uploads). */
-export async function downloadImages(urls, referer, limit = 10) {
+export async function downloadImages(urls, referer, limit = 16) {
   const out = [];
   for (const url of urls.slice(0, limit)) {
     try {

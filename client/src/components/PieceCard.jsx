@@ -19,8 +19,17 @@ function storeLine({ brand, store }) {
   return store && !store.replace(/[^a-z0-9]/gi, '').toLowerCase().includes(key) ? `${brand} · ${store}` : brand;
 }
 
-export default function PieceCard({ piece, wearing, size, body, sex, onWear, onTakeOff, onSize, onKind, onRemove }) {
+export default function PieceCard({ piece, wearing, size, body, sex, onWear, onTakeOff, onSize, onKind, onUsePhoto, onRemove }) {
   const [open, setOpen] = useState(false);
+  const [recutting, setRecutting] = useState(null);
+  const [recutError, setRecutError] = useState('');
+  const usePhoto = (u) => {
+    setRecutting(u);
+    setRecutError('');
+    onUsePhoto(u)
+      .catch((e) => setRecutError(e.message))
+      .finally(() => setRecutting(null));
+  };
   const fit = fitFor(piece, size, body, sex);
   const rec = recommendSize(piece, body, sex);
   const thumb = piece.textures?.front?.url || (piece.images?.[0] && proxied(piece.images[0], piece.url));
@@ -91,15 +100,30 @@ export default function PieceCard({ piece, wearing, size, body, sex, onWear, onT
               <figcaption>Back</figcaption>
             </figure>
           )}
-          {(piece.images || []).map((u) => (
-            <figure key={u}>
-              <img src={proxied(u, piece.url)} alt="" loading="lazy" />
-            </figure>
-          ))}
+          {(piece.images || []).map((u) => {
+            const info = piece.photos?.find((p) => p.url === u);
+            const inUse = piece.textures?.front?.source === u;
+            return (
+              <figure key={u} className={inUse ? 'in-use' : ''}>
+                <img src={proxied(u, piece.url)} alt="" loading="lazy" />
+                <figcaption>
+                  {inUse ? (
+                    'In use'
+                  ) : (
+                    <button className="link" disabled={Boolean(recutting)} onClick={() => usePhoto(u)}>
+                      {recutting === u ? 'Cutting out…' : 'Use this photo'}
+                    </button>
+                  )}
+                  {info?.packshot && !inUse ? ' · product only' : ''}
+                </figcaption>
+              </figure>
+            );
+          })}
+          {recutError && <p className="hint error">{recutError}</p>}
           <p className="hint">
             {piece.vision
               ? 'Claude picked the photos that show this exact piece and boxed it out from the rest of the outfit.'
-              : 'Fitcheck picked the cleanest photo of this piece. If the wrong item was cut out, set the right type above.'}
+              : 'Fitcheck picked the cleanest photo of this piece. If it picked the wrong one, tap “Use this photo” under a better one, or set the right type above.'}
           </p>
         </div>
       )}

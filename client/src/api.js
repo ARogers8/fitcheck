@@ -28,6 +28,40 @@ export async function importPiece(body) {
   return data;
 }
 
+/** Cuts the piece out of one specific photo the user picked. */
+export async function recutPiece(body) {
+  const res = await fetch(`${API_BASE}/api/recut`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ error: `Re-cut failed (${res.status}).` }));
+  if (!res.ok) throw new Error(data.error || `Re-cut failed (${res.status}).`);
+  if (data.textures?.front) data.textures.front.url = fromApi(data.textures.front.url);
+  return data;
+}
+
+/** Asks the server for a photoreal picture of the avatar in the outfit. */
+export async function renderPhoto({ avatar, outfit, modelImage }) {
+  if (onStaticHost) throw new Error('Realistic photos need the Fitcheck server, and this copy of the site isn’t connected to one yet.');
+  const pieces = outfit.map((p) => ({
+    kind: p.kind,
+    title: p.title,
+    image: p.textures?.front?.source || p.images?.[0],
+    packshot: Boolean(p.textures?.front?.packshot),
+    ref: p.url,
+  }));
+  const res = await fetch(`${API_BASE}/api/render`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ avatar, pieces, modelImage }),
+  });
+  const data = await res.json().catch(() => ({ error: `Render failed (${res.status}).` }));
+  if (!res.ok) throw new Error(data.error || `Render failed (${res.status}).`);
+  data.image = fromApi(data.image);
+  return data;
+}
+
 /** Shrinks an uploaded photo and returns it as a data URL. */
 export function fileToDataUrl(file, max = 1400) {
   return new Promise((resolve, reject) => {

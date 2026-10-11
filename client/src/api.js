@@ -58,6 +58,7 @@ export async function renderPhoto({ avatar, outfit, modelImage }) {
   });
   const data = await res.json().catch(() => ({ error: `Render failed (${res.status}).` }));
   if (!res.ok) throw new Error(data.error || `Render failed (${res.status}).`);
+  data.image = fromApi(data.image);
   return data;
 }
 

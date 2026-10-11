@@ -41,6 +41,7 @@ export default function RealisticPhoto({ avatar, outfit, onClose }) {
           <div className="realistic-wait">
             <div className="spinner" />
             <p>Dressing {myPhoto ? 'your photo' : 'a real-looking model'} in {outfit.length} piece{outfit.length > 1 ? 's' : ''}…</p>
+            <p className="hint">On the free models this can take a minute or two, longer if they’re busy.</p>
           </div>
         )}
         {state.status === 'done' && <img src={state.image} alt="You in this outfit" />}

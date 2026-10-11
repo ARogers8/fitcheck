@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 import { scrapeProduct, downloadImages, fetchImage, assertPublicUrl, ScrapeError } from './scrape.js';
 import { detectKind, KINDS } from './category.js';
 import { buildGarment, CACHE_DIR } from './garment.js';
@@ -138,9 +139,7 @@ async function asDataUri(image, ref) {
 app.post('/api/render', async (req, res) => {
   const { avatar, pieces = [], modelImage } = req.body || {};
   try {
-    if (!renderAvailable()) {
-      throw new RenderError('Realistic photos need a FASHN API key on the server (FASHN_API_KEY).', 503);
-    }
+    if (!renderAvailable()) throw new RenderError('Realistic photos are turned off on this server.', 503);
     if (modelImage && !/^data:image\//.test(modelImage)) throw new RenderError('Your photo must be an uploaded image.', 400);
     const ready = await Promise.all(
       pieces.slice(0, 6).map(async (p) => ({
@@ -151,6 +150,14 @@ app.post('/api/render', async (req, res) => {
       }))
     );
     const out = await renderOutfit({ avatar, pieces: ready, modelImage: modelImage && (await asDataUri(modelImage)) });
+    if (out.image.startsWith('data:')) {
+      // Free-model results come back inline; save them so the page gets a real link.
+      const buf = Buffer.from(out.image.split(',')[1], 'base64');
+      const file = `render-${createHash('sha1').update(buf).digest('hex').slice(0, 20)}.jpg`;
+      await mkdir(CACHE_DIR, { recursive: true });
+      await sharp(buf).jpeg({ quality: 92 }).toFile(path.join(CACHE_DIR, file));
+      out.image = `/cache/${file}`;
+    }
     res.json(out);
   } catch (err) {
     const status = err instanceof RenderError || err instanceof ScrapeError ? err.status : 500;

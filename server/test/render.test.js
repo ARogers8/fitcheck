@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planSteps, modelPrompt, renderOutfit } from '../src/render.js';
+import { planSteps, modelPrompt, renderOutfit, fashnProvider, gradioProvider } from '../src/render.js';
 
 test('try-on steps go dress, bottoms, then tops inside out; shoes are skipped', () => {
   const steps = planSteps([
@@ -33,7 +33,7 @@ test('renders by chaining FASHN jobs and reuses the base person', async () => {
     const id = url.split('/').pop();
     return { ok: true, json: async () => ({ status: 'completed', output: [`https://cdn.test/${id}.jpg`] }) };
   };
-  const opts = { fetchImpl, sleep: async () => {} };
+  const opts = { provider: fashnProvider({ fetchImpl, sleep: async () => {} }) };
   const avatar = { sex: 'male', heightCm: 180, weightKg: 80, skin: 'tan', hairStyle: 'short', hairColor: '#3b2618' };
   const pieces = [
     { kind: 'sweater', image: 'data:image/jpeg;base64,AA', title: 'Sweater', packshot: true },
@@ -46,4 +46,38 @@ test('renders by chaining FASHN jobs and reuses the base person', async () => {
   assert.equal(out.image, 'https://cdn.test/job3.jpg');
   await renderOutfit({ avatar, pieces: [pieces[0]] }, opts);
   assert.equal(runs.filter((r) => r.model_name === 'model-create').length, 1, 'person generated once');
+});
+
+test('the free path calls the open models through Gradio', async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(Buffer.from('img'), { headers: { 'content-type': 'image/jpeg' } });
+  try {
+    const connect = async (src) => ({
+      predict: async (endpoint, data) => {
+        calls.push({ src, endpoint, data });
+        return { data: [{ url: `https://space.test/${calls.length}.jpg` }] };
+      },
+    });
+    const provider = gradioProvider({ connect });
+    const out = await renderOutfit(
+      {
+        avatar: { sex: 'female', heightCm: 168, weightKg: 60 },
+        pieces: [
+          { kind: 'tee', image: 'data:image/jpeg;base64,AA', title: 'Tee' },
+          { kind: 'skirt', image: 'data:image/jpeg;base64,BB', title: 'Skirt' },
+        ],
+      },
+      { provider }
+    );
+    assert.deepEqual(
+      calls.map((c) => `${c.src}${c.endpoint}`),
+      ['black-forest-labs/FLUX.1-schnell/infer', 'zhengchong/CatVTON/submit_function', 'yisol/IDM-VTON/tryon']
+    );
+    assert.equal(calls[1].data[2], 'lower');
+    assert.match(out.image, /^data:image\/jpeg;base64,/);
+    assert.equal(out.provider, 'gradio');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

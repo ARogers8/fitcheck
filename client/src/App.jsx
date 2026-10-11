@@ -4,6 +4,7 @@ import AvatarPanel from './components/AvatarPanel.jsx';
 import AddPiece from './components/AddPiece.jsx';
 import PieceCard, { KIND_SLOTS } from './components/PieceCard.jsx';
 import FallbackDialog from './components/FallbackDialog.jsx';
+import RealisticPhoto from './components/RealisticPhoto.jsx';
 import { useFitcheckStore } from './store.js';
 import { importPiece, recutPiece, formatPrice } from './api.js';
 import { bodyMeasurements } from './body/measurements.js';
@@ -16,6 +17,7 @@ export default function App() {
   const [fallback, setFallback] = useState(null);
   const [view, setView] = useState({ name: 'full', n: 0 });
   const [autoRotate, setAutoRotate] = useState(false);
+  const [realistic, setRealistic] = useState(false);
 
   const body = useMemo(() => bodyMeasurements(state.avatar), [state.avatar]);
   const outfit = useMemo(() => state.wearing.map((id) => state.pieces.find((p) => p.id === id)).filter(Boolean), [state.wearing, state.pieces]);
@@ -106,7 +108,13 @@ export default function App() {
             <button className={autoRotate ? 'on' : ''} onClick={() => setAutoRotate((r) => !r)}>
               {autoRotate ? 'Stop' : 'Spin 360°'}
             </button>
+            <button className="primary" disabled={!outfit.length} title={outfit.length ? '' : 'Put something on first'} onClick={() => setRealistic(true)}>
+              Realistic photo
+            </button>
           </div>
+          {realistic && outfit.length > 0 && (
+            <RealisticPhoto avatar={state.avatar} outfit={outfit} onClose={() => setRealistic(false)} />
+          )}
           <div className="stage-hint">Drag to rotate · scroll or pinch to zoom · right-drag to move</div>
           {outfit.length > 0 && (
             <div className="outfit-bar">

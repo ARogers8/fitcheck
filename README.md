@@ -34,14 +34,23 @@ is wearing never end up on your avatar. Without it, Fitcheck uses photo heuristi
 
 ### Realistic photos
 
-Claude can read product photos but can't generate images, so the photoreal view uses
-[FASHN](https://fashn.ai), a clothing try-on model. Set `FASHN_API_KEY` on the server
-(next to `ANTHROPIC_API_KEY`) and a **Realistic photo** button turns the current
-outfit into a studio photo: a real-looking person matching your model (sex, skin,
-hair, height, build), or your own uploaded full-body photo, wearing each piece in
-turn. Each render takes several seconds per piece and uses FASHN credits (one per
-piece, plus one to create the person, which is then reused). Shoes and hats are not
-rendered yet.
+Claude can read product photos but can't generate images, so the **Realistic photo**
+button uses open image-generation models. It makes a studio photo of a real-looking
+person matching your model (sex, skin, hair, height, build), or uses your own
+full-body photo, then puts on each piece in turn. Shoes and hats aren't rendered yet.
+
+Three ways to run it, from free to fastest:
+
+1. **Free (default, nothing to set up).** Public Hugging Face Spaces: FLUX.1-schnell
+   makes the person, IDM-VTON puts on tops, CatVTON bottoms and dresses. They're
+   shared GPUs, so a render can take a minute or two or hit a daily quota. A free
+   Hugging Face account token in `HF_TOKEN` raises the quota.
+2. **Your own AI.** Run the same open models on a GPU you own or rent (IDM-VTON wants
+   about 16-24 GB of VRAM, CatVTON about 8 GB) using their Gradio apps, then point
+   Fitcheck at them: `TRYON_SPACE` (tops), `TRYON_LOWER_SPACE` (bottoms, dresses) and
+   `PERSON_SPACE` (person) accept a Space name or a URL like `http://my-gpu:7860`.
+3. **FASHN** (paid API, a few seconds per piece): set `FASHN_API_KEY` and it's used
+   instead.
 
 ## What it does
 

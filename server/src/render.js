@@ -1,12 +1,22 @@
-// Photoreal try-on through FASHN (https://fashn.ai). Claude can read photos but not
-// paint them, so the realistic picture comes from an image-generation try-on model:
-// first a studio photo of a person matching the avatar ("model-create"), then each
-// piece is put on in turn ("tryon-v1.6"), bottoms before tops so layers stack.
+// Photoreal try-on. Claude can read photos but not paint them, so the realistic
+// picture comes from image-generation models: first a studio photo of a person
+// matching the avatar, then each piece is put on in turn, bottoms before tops so
+// layers stack. Three ways to run those models:
+//
+//   free (default)  Public Hugging Face Spaces: FLUX.1-schnell makes the person,
+//                   IDM-VTON puts on tops, CatVTON bottoms and dresses. No key
+//                   needed; a free HF_TOKEN raises the GPU quota. Can queue.
+//   your own GPU    Run the same open models yourself and point TRYON_SPACE /
+//                   TRYON_LOWER_SPACE / PERSON_SPACE at them (any Gradio URL).
+//   FASHN           Paid API, fastest. Used when FASHN_API_KEY is set.
 import { createHash } from 'node:crypto';
+import { Client, handle_file } from '@gradio/client';
 
 const API = 'https://api.fashn.ai/v1';
 
-export const renderAvailable = () => Boolean(process.env.FASHN_API_KEY);
+export const renderProvider = () => (process.env.FASHN_API_KEY ? 'fashn' : 'gradio');
+// The free path needs no key, so photo renders are always offered.
+export const renderAvailable = () => process.env.RENDER_DISABLED !== '1';
 
 export class RenderError extends Error {
   constructor(message, status = 502) {
@@ -119,19 +129,132 @@ export const avatarKey = (avatar = {}) =>
     .digest('hex')
     .slice(0, 16);
 
+/** FASHN: paid API, one credit per image. */
+export function fashnProvider(opts = {}) {
+  return {
+    name: 'fashn',
+    makePerson: (prompt, seed) => runModel('model-create', { prompt, aspect_ratio: '2:3', seed, output_format: 'jpeg' }, opts),
+    tryOn: (image, step, seed) =>
+      runModel(
+        'tryon-v1.6',
+        {
+          model_image: image,
+          garment_image: step.garment_image,
+          category: step.category,
+          garment_photo_type: step.garment_photo_type,
+          mode: 'balanced',
+          seed,
+          output_format: 'jpeg',
+        },
+        opts
+      ),
+  };
+}
+
+const toBlob = async (image) => {
+  if (image.startsWith('data:')) {
+    const [head, b64] = image.split(',');
+    return new Blob([Buffer.from(b64, 'base64')], { type: head.slice(5).split(';')[0] });
+  }
+  const res = await fetch(image);
+  if (!res.ok) throw new RenderError('Couldn’t fetch an intermediate try-on image.');
+  return res.blob();
+};
+
+/** First file a Gradio endpoint returned, as a data URI (Space URLs are short-lived). */
+async function gradioImage(result) {
+  const first = [].concat(result?.data?.[0] ?? [])[0];
+  const url = typeof first === 'string' ? first : first?.url;
+  if (!url) throw new RenderError('The try-on model returned no image.');
+  const res = await fetch(url);
+  if (!res.ok) throw new RenderError('Couldn’t download the try-on result.');
+  const type = res.headers.get('content-type') || 'image/png';
+  return `data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`;
+}
+
+const friendly = (err) => {
+  const msg = String(err?.message || err);
+  if (/quota|exceeded|ZeroGPU/i.test(msg)) {
+    return new RenderError('The free try-on GPUs are out of quota for now. Add a free Hugging Face token (HF_TOKEN) on the server, wait a bit, or use your own GPU or FASHN.', 429);
+  }
+  if (/queue|too many|503|sleeping|paused|building/i.test(msg)) {
+    return new RenderError('The free try-on model is busy or waking up. Try again in a minute.', 503);
+  }
+  return err instanceof RenderError ? err : new RenderError(`The try-on model failed: ${msg.slice(0, 200)}`);
+};
+
+/**
+ * Open models behind Gradio apps: public Hugging Face Spaces by default, or your
+ * own server running the same apps. `connect` is injectable for tests.
+ */
+export function gradioProvider({ connect = (src, o) => Client.connect(src, o) } = {}) {
+  const token = process.env.HF_TOKEN || undefined;
+  const clients = new Map();
+  const app = (src) => {
+    if (!clients.has(src)) {
+      const c = connect(src, token ? { token } : {});
+      clients.set(src, c);
+      c.catch(() => clients.delete(src));
+    }
+    return clients.get(src);
+  };
+  const person = process.env.PERSON_SPACE || 'black-forest-labs/FLUX.1-schnell';
+  const upper = process.env.TRYON_SPACE || 'yisol/IDM-VTON';
+  const lower = process.env.TRYON_LOWER_SPACE || 'zhengchong/CatVTON';
+  const editor = (blob) => ({ background: handle_file(blob), layers: [], composite: null });
+  return {
+    name: 'gradio',
+    async makePerson(prompt, seed) {
+      try {
+        const c = await app(person);
+        return await gradioImage(await c.predict('/infer', [prompt, seed, false, 768, 1152, 4]));
+      } catch (err) {
+        throw friendly(err);
+      }
+    },
+    async tryOn(image, step, seed) {
+      try {
+        const [personBlob, garmentBlob] = await Promise.all([toBlob(image), toBlob(step.garment_image)]);
+        if (step.category === 'tops' && !process.env.TRYON_LOWER_ONLY) {
+          const c = await app(upper);
+          // IDM-VTON: person editor, garment, description, auto-mask, auto-crop, steps, seed.
+          return await gradioImage(
+            await c.predict('/tryon', [editor(personBlob), handle_file(garmentBlob), step.title || 'clothing', true, true, 30, seed])
+          );
+        }
+        const c = await app(lower);
+        // CatVTON: person editor, cloth, upper/lower/overall, steps, guidance, seed, show type.
+        const type = { tops: 'upper', bottoms: 'lower', 'one-pieces': 'overall' }[step.category];
+        return await gradioImage(
+          await c.predict('/submit_function', [editor(personBlob), handle_file(garmentBlob), type, 50, 2.5, seed, 'result only'])
+        );
+      } catch (err) {
+        throw friendly(err);
+      }
+    },
+  };
+}
+
+let defaultProvider = null;
+const pickProvider = () => {
+  const want = renderProvider();
+  if (defaultProvider?.name !== want) defaultProvider = want === 'fashn' ? fashnProvider() : gradioProvider();
+  return defaultProvider;
+};
+
 /**
  * Renders the outfit. `modelImage` (a URL or data URI) is the user's own photo;
  * without it a person matching the avatar is generated once and reused.
  */
-export async function renderOutfit({ avatar, pieces, modelImage, seed = 7 }, opts = {}) {
+export async function renderOutfit({ avatar, pieces, modelImage, seed = 7 }, { provider = pickProvider() } = {}) {
   const steps = planSteps(pieces);
   if (!steps.length) throw new RenderError('Put on a top, bottoms or a dress first. Shoes and hats can’t be photo-rendered yet.', 400);
 
   let model = modelImage;
   if (!model) {
-    const key = avatarKey(avatar);
+    const key = `${provider.name}:${avatarKey(avatar)}`;
     if (!baseCache.has(key)) {
-      const pending = runModel('model-create', { prompt: modelPrompt(avatar), aspect_ratio: '2:3', seed, output_format: 'jpeg' }, opts);
+      const pending = provider.makePerson(modelPrompt(avatar), seed);
       baseCache.set(key, pending);
       pending.catch(() => baseCache.delete(key));
     }
@@ -139,20 +262,6 @@ export async function renderOutfit({ avatar, pieces, modelImage, seed = 7 }, opt
   }
 
   let image = model;
-  for (const step of steps) {
-    image = await runModel(
-      'tryon-v1.6',
-      {
-        model_image: image,
-        garment_image: step.garment_image,
-        category: step.category,
-        garment_photo_type: step.garment_photo_type,
-        mode: 'balanced',
-        seed,
-        output_format: 'jpeg',
-      },
-      opts
-    );
-  }
-  return { image, base: model, skipped: pieces.filter((p) => !TRYON_CATEGORY[p.kind]).map((p) => p.title) };
+  for (const step of steps) image = await provider.tryOn(image, step, seed);
+  return { image, provider: provider.name, skipped: pieces.filter((p) => !TRYON_CATEGORY[p.kind]).map((p) => p.title) };
 }

@@ -46,7 +46,7 @@ export default function FallbackDialog({ state, onClose, onSubmit }) {
         <p>
           Drag this button to your bookmarks bar once. Then on any product page, click it and the piece opens here with all its photos and sizes.
         </p>
-        <a className="bookmarklet" href={bookmarkletHref(window.location.origin)} onClick={(e) => e.preventDefault()} draggable>
+        <a className="bookmarklet" href={bookmarkletHref(window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, ''))} onClick={(e) => e.preventDefault()} draggable>
           ➜ Send to Fitcheck
         </a>
         {state.url && (

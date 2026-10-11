@@ -16,6 +16,18 @@ npm run dev           # API on :8787, app on http://localhost:5173
 
 Production build: `npm run build && npm start` (the API serves the built app on :8787).
 
+### On GitHub Pages
+
+GitHub Pages only serves static files, so it hosts the app but not the server that
+reads product links.
+
+1. Repo **Settings > Pages > Source: GitHub Actions** (not a branch). The workflow in
+   `.github/workflows/pages.yml` builds and publishes the site on every push to `main`.
+2. To make link pasting work there, host the server (for example on Render with the
+   included `render.yaml`), then add a repository variable `FITCHECK_API_URL` with its
+   address (Settings > Secrets and variables > Actions > Variables) and re-run the
+   workflow.
+
 Optional: set `ANTHROPIC_API_KEY` before starting the server. With it, Claude looks
 at each product's photos and boxes out the exact piece, so the other clothes a model
 is wearing never end up on your avatar. Without it, Fitcheck uses photo heuristics.

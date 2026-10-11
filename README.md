@@ -32,6 +32,17 @@ Optional: set `ANTHROPIC_API_KEY` before starting the server. With it, Claude lo
 at each product's photos and boxes out the exact piece, so the other clothes a model
 is wearing never end up on your avatar. Without it, Fitcheck uses photo heuristics.
 
+### Realistic photos
+
+Claude can read product photos but can't generate images, so the photoreal view uses
+[FASHN](https://fashn.ai), a clothing try-on model. Set `FASHN_API_KEY` on the server
+(next to `ANTHROPIC_API_KEY`) and a **Realistic photo** button turns the current
+outfit into a studio photo: a real-looking person matching your model (sex, skin,
+hair, height, build), or your own uploaded full-body photo, wearing each piece in
+turn. Each render takes several seconds per piece and uses FASHN credits (one per
+piece, plus one to create the person, which is then reused). Shoes and hats are not
+rendered yet.
+
 ## What it does
 
 - **Your model**: male or female body, nine skin tones, hair style and colour, height and

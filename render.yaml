@@ -11,3 +11,5 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: FASHN_API_KEY
+        sync: false

@@ -7,6 +7,8 @@ import { detectKind, KINDS } from './category.js';
 import { buildGarment, CACHE_DIR } from './garment.js';
 import { visionAvailable, locateGarment } from './vision.js';
 import { dedupeImages, dedupeSizes } from './extract.js';
+import { renderAvailable, renderOutfit, RenderError } from './render.js';
+import sharp from 'sharp';
 
 const app = express();
 app.use(express.json({ limit: '30mb' }));
@@ -18,7 +20,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, vision: visionAvailable() }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, vision: visionAvailable(), render: renderAvailable() }));
 
 /** Product data supplied by the bookmarklet or the manual form instead of a fetch. */
 function normalizeSuppliedPage(page, url) {
@@ -113,6 +115,45 @@ app.post('/api/recut', async (req, res) => {
     res.json({ color: garment.color, textures: { front: { ...front, url: `/cache/${front.file}` }, back: null } });
   } catch (err) {
     const status = err instanceof ScrapeError ? err.status : 500;
+    if (status === 500) console.error(err);
+    res.status(status).json({ error: err.message });
+  }
+});
+
+/** Product photo -> JPEG data URI, so the try-on service never hits store hotlink walls. */
+async function asDataUri(image, ref) {
+  let buffer;
+  if (/^data:image\//.test(image)) buffer = Buffer.from(image.split(',')[1] || '', 'base64');
+  else {
+    const [photo] = await downloadImages([image], ref, 1);
+    if (!photo) throw new RenderError('Couldn’t download one of the product photos.');
+    buffer = photo.buffer;
+  }
+  const jpg = await sharp(buffer, { failOn: 'none' }).rotate().flatten({ background: '#ffffff' })
+    .resize(1296, 1296, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+  return `data:image/jpeg;base64,${jpg.toString('base64')}`;
+}
+
+/** Photoreal picture of the avatar wearing the outfit (needs FASHN_API_KEY). */
+app.post('/api/render', async (req, res) => {
+  const { avatar, pieces = [], modelImage } = req.body || {};
+  try {
+    if (!renderAvailable()) {
+      throw new RenderError('Realistic photos need a FASHN API key on the server (FASHN_API_KEY).', 503);
+    }
+    if (modelImage && !/^data:image\//.test(modelImage)) throw new RenderError('Your photo must be an uploaded image.', 400);
+    const ready = await Promise.all(
+      pieces.slice(0, 6).map(async (p) => ({
+        kind: String(p.kind || ''),
+        title: String(p.title || '').slice(0, 200),
+        packshot: Boolean(p.packshot),
+        image: p.image ? await asDataUri(String(p.image), p.ref ? String(p.ref) : undefined) : null,
+      }))
+    );
+    const out = await renderOutfit({ avatar, pieces: ready, modelImage: modelImage && (await asDataUri(modelImage)) });
+    res.json(out);
+  } catch (err) {
+    const status = err instanceof RenderError || err instanceof ScrapeError ? err.status : 500;
     if (status === 500) console.error(err);
     res.status(status).json({ error: err.message });
   }

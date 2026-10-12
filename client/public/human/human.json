@@ -1,0 +1,340 @@
+{
+ "source": "MakeHuman 1.1 hm08 base mesh, macro targets, default skeleton and high-poly eyes (CC0)",
+ "points": 14694,
+ "bodyPoints": 13380,
+ "eyePoints": 1064,
+ "lashPoints": 250,
+ "joints": [
+  "clavicle.L",
+  "upperarm01.L",
+  "lowerarm01.L",
+  "wrist.L",
+  "finger3-1.L",
+  "upperleg01.L",
+  "lowerleg01.L",
+  "foot.L",
+  "eye.L",
+  "clavicle.R",
+  "upperarm01.R",
+  "lowerarm01.R",
+  "wrist.R",
+  "finger3-1.R",
+  "upperleg01.R",
+  "lowerleg01.R",
+  "foot.R",
+  "eye.R",
+  "neck01",
+  "head",
+  "spine05",
+  "head.tail"
+ ],
+ "renderVerts": 15593,
+ "bodyIndexCount": 80268,
+ "eyeIndexCount": 6120,
+ "indexCount": 86388,
+ "morphs": [
+  {
+   "name": "male-minmuscle-minweight",
+   "scale": 2.0233771782586144e-06
+  },
+  {
+   "name": "male-minmuscle-averageweight",
+   "scale": 1.293984801782281e-06
+  },
+  {
+   "name": "male-minmuscle-maxweight",
+   "scale": 3.445539719840083e-06
+  },
+  {
+   "name": "male-averagemuscle-minweight",
+   "scale": 7.385479293191321e-07
+  },
+  {
+   "name": "male-averagemuscle-maxweight",
+   "scale": 7.171849726859341e-07
+  },
+  {
+   "name": "male-maxmuscle-minweight",
+   "scale": 1.2359996337778866e-06
+  },
+  {
+   "name": "male-maxmuscle-averageweight",
+   "scale": 1.220740379039888e-06
+  },
+  {
+   "name": "male-maxmuscle-maxweight",
+   "scale": 2.081362346263009e-06
+  },
+  {
+   "name": "male-minheight",
+   "scale": 1.119724112674337e-05
+  },
+  {
+   "name": "male-maxheight",
+   "scale": 2.197943052461318e-05
+  },
+  {
+   "name": "female-minmuscle-minweight",
+   "scale": 1.9775994140446184e-06
+  },
+  {
+   "name": "female-minmuscle-averageweight",
+   "scale": 1.022370067445906e-06
+  },
+  {
+   "name": "female-minmuscle-maxweight",
+   "scale": 2.8565324869533377e-06
+  },
+  {
+   "name": "female-averagemuscle-minweight",
+   "scale": 8.453627124851223e-07
+  },
+  {
+   "name": "female-averagemuscle-maxweight",
+   "scale": 6.378368480483413e-07
+  },
+  {
+   "name": "female-maxmuscle-minweight",
+   "scale": 9.643848994415115e-07
+  },
+  {
+   "name": "female-maxmuscle-averageweight",
+   "scale": 8.087405011139257e-07
+  },
+  {
+   "name": "female-maxmuscle-maxweight",
+   "scale": 1.7578661458174383e-06
+  },
+  {
+   "name": "female-minheight",
+   "scale": 1.119724112674337e-05
+  },
+  {
+   "name": "female-maxheight",
+   "scale": 2.197943052461318e-05
+  }
+ ],
+ "skinGroups": [
+  "clav",
+  "upper",
+  "fore",
+  "leg",
+  "foot"
+ ],
+ "heights": {
+  "male-min": 1.3639000000000001,
+  "male-max": 2.4535,
+  "male-avg": 1.7304,
+  "female-min": 1.228346666666667,
+  "female-max": 2.3177033333333337,
+  "female-avg": 1.5952466666666667
+ },
+ "ideal": 0.6,
+ "labels": [
+  "torso",
+  "neck",
+  "head",
+  "armL",
+  "armR",
+  "legL",
+  "legR",
+  "eye"
+ ],
+ "face": {
+  "maskChannels": [
+   "lips",
+   "beard",
+   "scalp",
+   "red",
+   "lowerBody",
+   "torso",
+   "unused",
+   "areola"
+  ],
+  "underwear": {
+   "male": {
+    "crotch": 0.021339999999999998,
+    "waist": 0.16018500000000002
+   },
+   "female": {
+    "crotch": -0.07015666666666667,
+    "waist": 0.053708333333333344,
+    "nipple": [
+     0.10345666666666667,
+     0.3414466666666667,
+     0.15842
+    ],
+    "shoulder": 0.48963583333333327
+   }
+  },
+  "eyeL": [
+   0.029358333333333337,
+   0.8032858333333334,
+   0.126385
+  ],
+  "eyeR": [
+   -0.029358333333333337,
+   0.8032858333333334,
+   0.126385
+  ],
+  "mouth": [
+   -2.2453690899864394e-18,
+   0.7321621543808691,
+   0.15537125022536005
+  ],
+  "skullZ": 0.05050333333333335,
+  "top": 0.91173
+ },
+ "arrays": {
+  "base_male": {
+   "offset": 0,
+   "length": 44148,
+   "type": "float32"
+  },
+  "base_female": {
+   "offset": 176592,
+   "length": 44148,
+   "type": "float32"
+  },
+  "morph_male-minmuscle-minweight": {
+   "offset": 353184,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-minmuscle-averageweight": {
+   "offset": 441480,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-minmuscle-maxweight": {
+   "offset": 529776,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-averagemuscle-minweight": {
+   "offset": 618072,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-averagemuscle-maxweight": {
+   "offset": 706368,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-maxmuscle-minweight": {
+   "offset": 794664,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-maxmuscle-averageweight": {
+   "offset": 882960,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-maxmuscle-maxweight": {
+   "offset": 971256,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-minheight": {
+   "offset": 1059552,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_male-maxheight": {
+   "offset": 1147848,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-minmuscle-minweight": {
+   "offset": 1236144,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-minmuscle-averageweight": {
+   "offset": 1324440,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-minmuscle-maxweight": {
+   "offset": 1412736,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-averagemuscle-minweight": {
+   "offset": 1501032,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-averagemuscle-maxweight": {
+   "offset": 1589328,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-maxmuscle-minweight": {
+   "offset": 1677624,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-maxmuscle-averageweight": {
+   "offset": 1765920,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-maxmuscle-maxweight": {
+   "offset": 1854216,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-minheight": {
+   "offset": 1942512,
+   "length": 44148,
+   "type": "int16"
+  },
+  "morph_female-maxheight": {
+   "offset": 2030808,
+   "length": 44148,
+   "type": "int16"
+  },
+  "renderToPoint": {
+   "offset": 2119104,
+   "length": 15593,
+   "type": "uint16"
+  },
+  "uv": {
+   "offset": 2150292,
+   "length": 31186,
+   "type": "float32"
+  },
+  "index": {
+   "offset": 2275036,
+   "length": 86388,
+   "type": "uint16"
+  },
+  "labels": {
+   "offset": 2447812,
+   "length": 14694,
+   "type": "uint8"
+  },
+  "skin": {
+   "offset": 2462508,
+   "length": 73470,
+   "type": "uint8"
+  },
+  "masks": {
+   "offset": 2535980,
+   "length": 117552,
+   "type": "uint8"
+  },
+  "lashStrip": {
+   "offset": 2653532,
+   "length": 250,
+   "type": "uint8"
+  },
+  "ao": {
+   "offset": 2653784,
+   "length": 14694,
+   "type": "uint8"
+  }
+ }
+}

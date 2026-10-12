@@ -1,86 +1,79 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { bodyGeometries } from '../body/geometry.js';
+import { bodyGeometry, buildHuman, eyeGeometry, humanReady, lashGeometry } from '../body/human.js';
 import { SKIN_TONES } from '../body/measurements.js';
+import { makeSkinMaterial } from './skinMaterial.js';
+import Hair from './Hair.jsx';
 
-function headGeometry(h) {
-  const g = new THREE.SphereGeometry(1, 48, 36);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    // Narrower jaw and chin, fuller back of the skull, a hint of a nose.
-    if (y < 0) {
-      const t = -y;
-      x *= 1 - 0.28 * t * t;
-      z *= 1 - 0.12 * t;
-    }
-    if (z < 0) z *= 1.04;
-    const nose = Math.exp(-((x / 0.12) ** 2) - ((y + 0.1) / 0.2) ** 2) * Math.max(0, z) * 0.11;
-    p.setXYZ(i, x * h.rx, y * h.ry, (z + nose) * h.rz);
+const BASE = (import.meta.env && import.meta.env.BASE_URL) || '/';
+let eyeTexture = null;
+function getEyeTexture() {
+  if (!eyeTexture) {
+    eyeTexture = new THREE.TextureLoader().load(`${BASE}human/eye.png`);
+    eyeTexture.colorSpace = THREE.SRGBColorSpace;
+    eyeTexture.anisotropy = 4;
   }
-  g.computeVertexNormals();
-  return g;
+  return eyeTexture;
 }
 
-function Hair({ rig, style, color }) {
-  const h = rig.head;
-  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color, roughness: 0.75 }), [color]);
-  const cap = useMemo(() => {
-    const g = new THREE.SphereGeometry(1, 48, 32, 0, Math.PI * 2, 0, Math.PI * 0.62);
-    return g;
-  }, []);
-  if (style === 'none') return null;
-  const s = style === 'buzz' ? 1.03 : 1.08;
-  return (
-    <group position={[0, h.y + h.ry * 0.02, -0.008]}>
-      <mesh geometry={cap} material={mat} scale={[h.rx * s, h.ry * s, h.rz * s]} rotation={[-0.3, 0, 0]} />
-      {style === 'long' && (
-        <mesh material={mat} position={[0, -h.ry * 0.75, -h.rz * 0.45]} scale={[h.rx * 1.1, h.ry * 1.2, h.rz * 0.55]}>
-          <sphereGeometry args={[1, 32, 24]} />
-        </mesh>
-      )}
-      {style === 'bun' && (
-        <mesh material={mat} position={[0, h.ry * 0.75, -h.rz * 0.7]} scale={h.rx * 0.42}>
-          <sphereGeometry args={[1, 24, 16]} />
-        </mesh>
-      )}
-    </group>
+function makeEyeMaterial() {
+  const mat = new THREE.MeshPhysicalMaterial({
+    map: getEyeTexture(),
+    roughness: 0.25,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    alphaTest: 0.5,
+  });
+  // The MakeHuman iris is reddish; shift it to a natural dark brown and calm the sclera.
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+{
+  vec3 c = diffuseColor.rgb;
+  float l = dot(c, vec3(0.3, 0.59, 0.11));
+  float iris = smoothstep(1.5, 2.4, c.r / (c.b + 0.004)) * (1.0 - smoothstep(0.25, 0.45, l));
+  vec3 sclera = min(c * vec3(1.16, 1.14, 1.1), vec3(0.9));
+  vec3 brown = vec3(0.3, 0.16, 0.08) * clamp(0.3 + 4.0 * l, 0.0, 1.0);
+  diffuseColor.rgb = mix(sclera, brown, iris);
+}`
+    );
+  };
+  mat.customProgramCacheKey = () => 'fitcheck-eye-v3';
+  return mat;
+}
+
+export default function Avatar({ avatar, hat = false, top = false }) {
+  const tone = SKIN_TONES.find((t) => t.id === avatar.skin)?.color || SKIN_TONES[2].color;
+  const female = avatar.sex === 'female';
+  const body = buildHuman(avatar);
+  const face = humanReady().info.face;
+  const style = avatar.hairStyle;
+  const scalp = style === 'none' ? 0 : style === 'buzz' ? 1 : 0.85;
+
+  const skinGeo = useMemo(() => bodyGeometry(body), [body]);
+  const eyeGeo = useMemo(() => eyeGeometry(body), [body]);
+  const lashGeo = useMemo(() => lashGeometry(body, { female }), [body, female]);
+  useEffect(() => () => [skinGeo, eyeGeo, lashGeo].forEach((g) => g.dispose()), [skinGeo, eyeGeo, lashGeo]);
+
+  const skin = useMemo(
+    () => makeSkinMaterial({ tone, hair: avatar.hairColor, female, scalp, face }),
+    [tone, avatar.hairColor, female, scalp, face]
   );
-}
-
-export default function Avatar({ rig, avatar }) {
-  const skin = SKIN_TONES.find((t) => t.id === avatar.skin)?.color || SKIN_TONES[2].color;
-  const material = useMemo(() => new THREE.MeshStandardMaterial({ color: skin, roughness: 0.55, metalness: 0 }), [skin]);
-  const parts = useMemo(() => bodyGeometries(rig), [rig]);
-  const head = useMemo(() => headGeometry(rig.head), [rig]);
-  const hands = useMemo(
-    () =>
-      rig.arms.map((arm) => {
-        const wrist = arm.joints[2];
-        const pos = wrist.clone().addScaledVector(arm.dir, arm.handLen * 0.38);
-        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), arm.dir);
-        return { pos, q, len: arm.handLen, side: arm.side };
-      }),
-    [rig]
+  // Bra straps would show above a strapless dress or a tank: hide them under tops.
+  skin.userData.uniforms.uStraps.value = top ? 0 : 1;
+  const eyeMat = useMemo(makeEyeMaterial, []);
+  const lashMat = useMemo(
+    () => new THREE.MeshStandardMaterial({ color: new THREE.Color(avatar.hairColor).multiplyScalar(0.35), roughness: 0.6, side: THREE.DoubleSide }),
+    [avatar.hairColor]
   );
 
   return (
     <group>
-      {parts.map((p) => (
-        <mesh key={p.name} geometry={p.geometry} material={material} castShadow />
-      ))}
-      <mesh geometry={head} material={material} position={[0, rig.head.y, 0]} castShadow />
-      {[-1, 1].map((s) => (
-        <mesh key={s} material={material} position={[s * rig.head.rx * 0.98, rig.head.y - rig.head.ry * 0.05, -rig.head.rz * 0.05]} scale={[rig.head.rx * 0.12, rig.head.ry * 0.25, rig.head.rz * 0.2]}>
-          <sphereGeometry args={[1, 16, 12]} />
-        </mesh>
-      ))}
-      {hands.map((hnd) => (
-        <mesh key={hnd.side} material={material} position={hnd.pos} quaternion={hnd.q} scale={[hnd.len * 0.11, hnd.len * 0.42, hnd.len * 0.2]}>
-          <sphereGeometry args={[1, 24, 16]} />
-        </mesh>
-      ))}
-      <Hair rig={rig} style={avatar.hairStyle} color={avatar.hairColor} />
+      <mesh geometry={skinGeo} material={skin} castShadow receiveShadow />
+      <mesh geometry={eyeGeo} material={eyeMat} />
+      <mesh geometry={lashGeo} material={lashMat} />
+      <Hair body={body} avatar={avatar} hat={hat} />
     </group>
   );
 }

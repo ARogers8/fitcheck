@@ -4,7 +4,7 @@ import AvatarPanel from './components/AvatarPanel.jsx';
 import AddPiece from './components/AddPiece.jsx';
 import PieceCard, { KIND_SLOTS } from './components/PieceCard.jsx';
 import FallbackDialog from './components/FallbackDialog.jsx';
-import RealisticPhoto from './components/RealisticPhoto.jsx';
+import PhotoStage from './components/PhotoStage.jsx';
 import { useFitcheckStore } from './store.js';
 import { importPiece, recutPiece, formatPrice } from './api.js';
 import { bodyMeasurements } from './body/measurements.js';
@@ -17,7 +17,7 @@ export default function App() {
   const [fallback, setFallback] = useState(null);
   const [view, setView] = useState({ name: 'full', n: 0 });
   const [autoRotate, setAutoRotate] = useState(false);
-  const [realistic, setRealistic] = useState(false);
+  const [mode, setMode] = useState('photo');
 
   const body = useMemo(() => bodyMeasurements(state.avatar), [state.avatar]);
   const outfit = useMemo(() => state.wearing.map((id) => state.pieces.find((p) => p.id === id)).filter(Boolean), [state.wearing, state.pieces]);
@@ -98,24 +98,29 @@ export default function App() {
         </aside>
 
         <section className="stage">
-          <Scene avatar={state.avatar} outfit={outfit} sizes={state.sizes} view={view} autoRotate={autoRotate} />
-          <div className="stage-tools">
-            {Object.keys(VIEWS).map((v) => (
-              <button key={v} className={view.name === v ? 'on' : ''} onClick={() => setView((p) => ({ name: v, n: p.n + 1 }))}>
-                {v === 'full' ? 'Head to toe' : v[0].toUpperCase() + v.slice(1)}
-              </button>
-            ))}
-            <button className={autoRotate ? 'on' : ''} onClick={() => setAutoRotate((r) => !r)}>
-              {autoRotate ? 'Stop' : 'Spin 360°'}
-            </button>
-            <button className="primary" disabled={!outfit.length} title={outfit.length ? '' : 'Put something on first'} onClick={() => setRealistic(true)}>
-              Realistic photo
-            </button>
-          </div>
-          {realistic && outfit.length > 0 && (
-            <RealisticPhoto avatar={state.avatar} outfit={outfit} onClose={() => setRealistic(false)} />
+          {mode === 'photo' ? (
+            <PhotoStage avatar={state.avatar} outfit={outfit} onShow3d={() => setMode('3d')} />
+          ) : (
+            <Scene avatar={state.avatar} outfit={outfit} sizes={state.sizes} view={view} autoRotate={autoRotate} />
           )}
-          <div className="stage-hint">Drag to rotate · scroll or pinch to zoom · right-drag to move</div>
+          <div className="stage-tools">
+            <button className={mode === 'photo' ? 'on' : ''} onClick={() => setMode('photo')}>Photo</button>
+            <button className={mode === '3d' ? 'on' : ''} onClick={() => setMode('3d')}>3D</button>
+            {mode === '3d' && (
+              <>
+                <span className="sep" />
+                {Object.keys(VIEWS).map((v) => (
+                  <button key={v} className={view.name === v ? 'on' : ''} onClick={() => setView((p) => ({ name: v, n: p.n + 1 }))}>
+                    {v === 'full' ? 'Head to toe' : v[0].toUpperCase() + v.slice(1)}
+                  </button>
+                ))}
+                <button className={autoRotate ? 'on' : ''} onClick={() => setAutoRotate((r) => !r)}>
+                  {autoRotate ? 'Stop' : 'Spin 360°'}
+                </button>
+              </>
+            )}
+          </div>
+          {mode === '3d' && <div className="stage-hint">Drag to rotate · scroll or pinch to zoom · right-drag to move</div>}
           {outfit.length > 0 && (
             <div className="outfit-bar">
               <span>Wearing {outfit.length} piece{outfit.length > 1 ? 's' : ''}</span>

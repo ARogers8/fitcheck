@@ -8,7 +8,7 @@ import { detectKind, KINDS } from './category.js';
 import { buildGarment, CACHE_DIR } from './garment.js';
 import { visionAvailable, locateGarment } from './vision.js';
 import { dedupeImages, dedupeSizes } from './extract.js';
-import { renderAvailable, renderOutfit, RenderError } from './render.js';
+import { renderAvailable, renderOutfit, makePerson, RenderError } from './render.js';
 import sharp from 'sharp';
 import { redact, sendError, errorHandler } from './safe.js';
 
@@ -156,6 +156,17 @@ app.post('/api/render', async (req, res) => {
       out.image = `/cache/${file}`;
     }
     res.json(out);
+  } catch (err) {
+    sendError(res, err, { expected: err instanceof RenderError || err instanceof ScrapeError });
+  }
+});
+
+/** Photo of a real-looking person matching the avatar, shown as the main view. */
+app.post('/api/person', async (req, res) => {
+  try {
+    if (!renderAvailable()) throw new RenderError('Realistic photos are turned off on this server.', 503);
+    const image = await makePerson({ avatar: req.body?.avatar || {} });
+    res.json({ image: await asDataUri(image) });
   } catch (err) {
     sendError(res, err, { expected: err instanceof RenderError || err instanceof ScrapeError });
   }

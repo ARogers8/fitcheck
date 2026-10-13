@@ -56,7 +56,7 @@ export function modelPrompt(avatar = {}) {
       : `${HAIR_WORDS[avatar.hairStyle] || 'short'} ${HAIR_COLOR_WORDS[avatar.hairColor] || 'dark brown'} hair`;
   const base = 'a plain fitted white tank top and plain grey cotton shorts';
   return [
-    `Full body studio fashion photo of a real ${buildWord(cm, kg)} ${person}, about ${cm} cm tall,`,
+    `Full body studio fashion photo of a real ${buildWord(cm, kg)} ${person}, about ${Math.round(cm / 5) * 5} cm tall,`,
     `${SKIN_WORDS[avatar.skin] || 'medium'} skin, ${hair}, natural realistic face and skin texture,`,
     `standing straight facing the camera, arms relaxed at the sides, head to toe in frame, wearing ${base}`,
     'and plain white sneakers, plain light grey seamless backdrop, soft even studio lighting, sharp focus.',
@@ -123,9 +123,11 @@ export async function runModel(model_name, inputs, { fetchImpl = fetch, sleep = 
 // Base model photos by avatar, so changing clothes doesn't regenerate the person.
 const baseCache = new Map();
 
+const round5 = (n) => Math.round((Number(n) || 0) / 5) * 5;
+
 export const avatarKey = (avatar = {}) =>
   createHash('sha1')
-    .update(JSON.stringify([avatar.sex, avatar.heightCm, avatar.weightKg, avatar.skin, avatar.hairStyle, avatar.hairColor]))
+    .update(JSON.stringify([avatar.sex, round5(avatar.heightCm), round5(avatar.weightKg), avatar.skin, avatar.hairStyle, avatar.hairColor]))
     .digest('hex')
     .slice(0, 16);
 
@@ -180,7 +182,7 @@ const friendly = (err) => {
   if (/queue|too many|503|sleeping|paused|building/i.test(msg)) {
     return new RenderError('The free try-on model is busy or waking up. Try again in a minute.', 503);
   }
-  return err instanceof RenderError ? err : new RenderError(`The try-on model failed: ${msg.slice(0, 200)}`);
+  return err instanceof RenderError ? err : new RenderError(`The image model failed: ${msg.slice(0, 200)}`);
 };
 
 /**
@@ -242,6 +244,17 @@ const pickProvider = () => {
   return defaultProvider;
 };
 
+/** A photo of a real-looking person matching the avatar, made once per look and reused. */
+export async function makePerson({ avatar, seed = 7 }, { provider = pickProvider() } = {}) {
+  const key = `${provider.name}:${avatarKey(avatar)}`;
+  if (!baseCache.has(key)) {
+    const pending = provider.makePerson(modelPrompt(avatar), seed);
+    baseCache.set(key, pending);
+    pending.catch(() => baseCache.delete(key));
+  }
+  return baseCache.get(key);
+}
+
 /**
  * Renders the outfit. `modelImage` (a URL or data URI) is the user's own photo;
  * without it a person matching the avatar is generated once and reused.
@@ -250,16 +263,7 @@ export async function renderOutfit({ avatar, pieces, modelImage, seed = 7 }, { p
   const steps = planSteps(pieces);
   if (!steps.length) throw new RenderError('Put on a top, bottoms or a dress first. Shoes and hats can’t be photo-rendered yet.', 400);
 
-  let model = modelImage;
-  if (!model) {
-    const key = `${provider.name}:${avatarKey(avatar)}`;
-    if (!baseCache.has(key)) {
-      const pending = provider.makePerson(modelPrompt(avatar), seed);
-      baseCache.set(key, pending);
-      pending.catch(() => baseCache.delete(key));
-    }
-    model = await baseCache.get(key);
-  }
+  let model = modelImage || (await makePerson({ avatar, seed }, { provider }));
 
   let image = model;
   for (const step of steps) image = await provider.tryOn(image, step, seed);

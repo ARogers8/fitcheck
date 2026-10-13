@@ -81,3 +81,13 @@ test('the free path calls the open models through Gradio', async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test('the generated person is reused for the same look and small slider nudges', async () => {
+  const { makePerson } = await import('../src/render.js');
+  let made = 0;
+  const provider = { name: 'fake-person', makePerson: async () => `img${++made}` };
+  const a = { sex: 'male', heightCm: 178, weightKg: 75, skin: 'medium', hairStyle: 'short' };
+  assert.equal(await makePerson({ avatar: a }, { provider }), 'img1');
+  assert.equal(await makePerson({ avatar: { ...a, heightCm: 181 } }, { provider }), 'img1');
+  assert.equal(await makePerson({ avatar: { ...a, skin: 'deep' } }, { provider }), 'img2');
+});

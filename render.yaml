@@ -1,14 +1,17 @@
-# One-click deploy of the Fitcheck server on Render (render.com > New > Blueprint).
+# One-click deploy of the whole Fitcheck app (site + server) on Render
+# (render.com > New > Blueprint). The server serves the built site, so a custom
+# domain added to this service is all that's needed to go live.
 services:
   - type: web
-    name: fitcheck-api
+    name: fitcheck
     runtime: node
-    rootDir: server
     plan: free
-    buildCommand: npm ci
-    startCommand: node src/index.js
+    buildCommand: npm ci --prefix server && npm ci --prefix client --include=dev && npm --prefix client run build
+    startCommand: node server/src/index.js
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: "22"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: HF_TOKEN

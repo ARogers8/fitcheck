@@ -10,6 +10,7 @@ import { visionAvailable, locateGarment } from './vision.js';
 import { dedupeImages, dedupeSizes } from './extract.js';
 import { renderAvailable, renderOutfit, RenderError } from './render.js';
 import sharp from 'sharp';
+import { redact, sendError, errorHandler } from './safe.js';
 
 const app = express();
 app.use(express.json({ limit: '30mb' }));
@@ -70,7 +71,7 @@ app.post('/api/import', async (req, res) => {
           if (!forcedKind && !titleKind && KINDS[located.kind]) kind = located.kind;
         }
       } catch (err) {
-        console.warn('[vision] falling back to heuristics:', err.message);
+        console.warn('[vision] falling back to heuristics:', redact(err.message));
       }
     }
 
@@ -97,9 +98,7 @@ app.post('/api/import', async (req, res) => {
       sources: product.sources,
     });
   } catch (err) {
-    const status = err instanceof ScrapeError ? err.status : 500;
-    if (status === 500) console.error(err);
-    res.status(status).json({ error: err.message, blocked: Boolean(err.blocked) });
+    sendError(res, err, { expected: err instanceof ScrapeError, extra: { blocked: Boolean(err.blocked) } });
   }
 });
 
@@ -115,9 +114,7 @@ app.post('/api/recut', async (req, res) => {
     if (!front) throw new ScrapeError('Couldn’t find the piece in that photo.', { status: 422 });
     res.json({ color: garment.color, textures: { front: { ...front, url: `/cache/${front.file}` }, back: null } });
   } catch (err) {
-    const status = err instanceof ScrapeError ? err.status : 500;
-    if (status === 500) console.error(err);
-    res.status(status).json({ error: err.message });
+    sendError(res, err, { expected: err instanceof ScrapeError });
   }
 });
 
@@ -160,9 +157,7 @@ app.post('/api/render', async (req, res) => {
     }
     res.json(out);
   } catch (err) {
-    const status = err instanceof RenderError || err instanceof ScrapeError ? err.status : 500;
-    if (status === 500) console.error(err);
-    res.status(status).json({ error: err.message });
+    sendError(res, err, { expected: err instanceof RenderError || err instanceof ScrapeError });
   }
 });
 
@@ -186,6 +181,8 @@ if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.get(/^\/(?!api|cache).*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 }
+
+app.use(errorHandler);
 
 const port = Number(process.env.PORT || 8787);
 app.listen(port, () => {

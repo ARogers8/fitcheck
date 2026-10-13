@@ -1,0 +1,56 @@
+[
+  {
+    "file": "male-light-curly.jpg",
+    "sex": "male",
+    "skin": "light",
+    "build": "slim"
+  },
+  {
+    "file": "male-deep.jpg",
+    "sex": "male",
+    "skin": "deep",
+    "build": "slim"
+  },
+  {
+    "file": "male-porcelain.jpg",
+    "sex": "male",
+    "skin": "porcelain",
+    "build": "slim"
+  },
+  {
+    "file": "male-olive.jpg",
+    "sex": "male",
+    "skin": "olive",
+    "build": "slim"
+  },
+  {
+    "file": "male-light-medium.jpg",
+    "sex": "male",
+    "skin": "light-medium",
+    "build": "slim"
+  },
+  {
+    "file": "female-porcelain-blonde.jpg",
+    "sex": "female",
+    "skin": "porcelain",
+    "build": "slim"
+  },
+  {
+    "file": "female-light.jpg",
+    "sex": "female",
+    "skin": "light",
+    "build": "slim"
+  },
+  {
+    "file": "female-deep.jpg",
+    "sex": "female",
+    "skin": "deep",
+    "build": "slim"
+  },
+  {
+    "file": "female-light-medium.jpg",
+    "sex": "female",
+    "skin": "light-medium",
+    "build": "slim"
+  }
+]

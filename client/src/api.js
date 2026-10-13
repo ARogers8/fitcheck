@@ -62,6 +62,19 @@ export async function renderPhoto({ avatar, outfit, modelImage }) {
   return data;
 }
 
+/** Photo of a real-looking person matching the avatar (a data URL). */
+export async function makePersonPhoto(avatar) {
+  if (onStaticHost) throw new Error('Realistic photos need the Fitcheck server, and this copy of the site isn’t connected to one yet.');
+  const res = await fetch(`${API_BASE}/api/person`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ avatar }),
+  });
+  const data = await res.json().catch(() => ({ error: `Couldn’t make the model photo (${res.status}).` }));
+  if (!res.ok) throw new Error(data.error || `Couldn’t make the model photo (${res.status}).`);
+  return data.image;
+}
+
 /** Shrinks an uploaded photo and returns it as a data URL. */
 export function fileToDataUrl(file, max = 1400) {
   return new Promise((resolve, reject) => {

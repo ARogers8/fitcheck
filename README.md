@@ -16,6 +16,20 @@ npm run dev           # API on :8787, app on http://localhost:5173
 
 Production build: `npm run build && npm start` (the API serves the built app on :8787).
 
+### On Render with your own domain
+
+The simplest way to put the whole app online: `render.yaml` builds the site and runs the
+server as one free Render web service, so link pasting works with nothing else to set up.
+
+1. On render.com, **New > Blueprint**, pick this repo, and fill in any optional keys
+   below (or leave them blank).
+2. In the `fitcheck` service, **Settings > Custom Domains > Add**, enter your domain,
+   then add the DNS records Render shows at your domain registrar. Render issues the
+   HTTPS certificate on its own.
+
+The free plan sleeps after 15 idle minutes, so the first visit after a while takes
+about a minute to wake up.
+
 ### On GitHub Pages
 
 GitHub Pages only serves static files, so it hosts the app but not the server that
@@ -24,7 +38,7 @@ reads product links.
 1. Repo **Settings > Pages > Source: GitHub Actions** (not a branch). The workflow in
    `.github/workflows/pages.yml` builds and publishes the site on every push to `main`.
 2. To make link pasting work there, host the server (for example on Render with the
-   included `render.yaml`), then add a repository variable `FITCHECK_API_URL` with its
+   included `render.yaml`, which also serves the site itself), then add a repository variable `FITCHECK_API_URL` with its
    address (Settings > Secrets and variables > Actions > Variables) and re-run the
    workflow.
 
